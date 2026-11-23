@@ -18,11 +18,39 @@ window.CarolSongbook = (function () {
   // Hidden YouTube Audio-Only state
   let mode = "none"; // "html5" | "youtube" | "none"
   let currentYtId = "";
+  let currentSongTitle = "Carol Karaoke";
   let ytPlayer = null;
   let ytReady = false;
   let ytApiLoading = false;
   let ytPendingPlay = false;
   let ytPollId = null;
+
+  function updateMediaSession(isPlaying) {
+    if (!("mediaSession" in navigator)) return;
+    try {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: currentSongTitle || "Christmas Carol Karaoke",
+        artist: "St. Mary's Syro Malabar Catholic Church",
+        album: "Christmas Carol Songbook",
+        artwork: [
+          { src: "./icons/icon-192.png", sizes: "192x192", type: "image/png" },
+          { src: "./icons/icon-512.png", sizes: "512x512", type: "image/png" }
+        ]
+      });
+      navigator.mediaSession.playbackState = isPlaying ? "playing" : "paused";
+      navigator.mediaSession.setActionHandler("play", () => {
+        if (mode === "html5" && audioEl) audioEl.play().catch(() => {});
+        else if (mode === "youtube" && ytPlayer && ytReady) ytPlayer.playVideo();
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        if (mode === "html5" && audioEl) audioEl.pause();
+        else if (mode === "youtube" && ytPlayer && ytReady) ytPlayer.pauseVideo();
+      });
+      navigator.mediaSession.setActionHandler("seekto", (details) => {
+        if (details && typeof details.seekTime === "number") seekTo(details.seekTime);
+      });
+    } catch (e) {}
+  }
 
   function extractYouTubeId(url) {
     if (!url || typeof url !== "string") return "";
@@ -199,16 +227,19 @@ window.CarolSongbook = (function () {
       range.max = dur ? String(Math.floor(dur)) : "100";
       range.value = dur ? String(Math.floor(cur)) : "0";
       timeEl.textContent = `${fmtSec(cur)} / ${fmtSec(dur)}`;
+      updateMediaSession(playing);
       return;
     }
 
     if (mode === "html5" && audioEl) {
-      playBtn.textContent = audioEl.paused ? "▶ Play" : "⏸ Pause";
+      const playing = !audioEl.paused;
+      playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
       const dur = Number.isFinite(audioEl.duration) && audioEl.duration > 0 ? audioEl.duration : 0;
       const cur = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
       range.max = dur ? String(Math.floor(dur)) : "100";
       range.value = dur ? String(Math.floor(cur)) : "0";
       timeEl.textContent = `${fmtSec(cur)} / ${fmtSec(dur)}`;
+      updateMediaSession(playing);
     }
   }
 
@@ -281,6 +312,7 @@ window.CarolSongbook = (function () {
     }
 
     const current = list[activeIdx];
+    currentSongTitle = current.title || "Christmas Carol Karaoke";
     if (boxEl) {
       boxEl.style.fontSize = `${fontScale}rem`;
       boxEl.textContent = current.lyrics || "";
