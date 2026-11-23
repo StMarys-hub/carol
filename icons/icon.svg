@@ -1,0 +1,28 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <defs>
+    <radialGradient id="bg" cx="50%" cy="35%" r="70%">
+      <stop offset="0%" stop-color="#065f46"/>
+      <stop offset="100%" stop-color="#021711"/>
+    </radialGradient>
+    <linearGradient id="gold" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#fde68a"/>
+      <stop offset="50%" stop-color="#fbbf24"/>
+      <stop offset="100%" stop-color="#d97706"/>
+    </linearGradient>
+    <linearGradient id="tree" x1="0%" y1="0%" x2="0%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="100%" stop-color="#059669"/>
+    </linearGradient>
+  </defs>
+  <rect width="512" height="512" rx="112" fill="url(#bg)"/>
+  <circle cx="256" cy="256" r="224" fill="none" stroke="url(#gold)" stroke-width="10" opacity="0.55"/>
+  <!-- 4-point Bethlehem Star -->
+  <polygon points="256,54 274,104 324,122 274,140 256,190 238,140 188,122 238,104" fill="url(#gold)"/>
+  <!-- Stylized Christmas Tree -->
+  <polygon points="256,162 170,278 216,278 144,376 368,376 296,278 342,278" fill="url(#tree)"/>
+  <rect x="234" y="376" width="44" height="54" rx="8" fill="#b45309"/>
+  <!-- Ornaments -->
+  <circle cx="232" cy="248" r="10" fill="#fbbf24"/>
+  <circle cx="282" cy="316" r="11" fill="#f87171"/>
+  <circle cx="218" cy="336" r="10" fill="#38bdf8"/>
+</svg>

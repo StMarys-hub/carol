@@ -1,0 +1,32 @@
+{
+  "name": "Ward 4 Christmas Carol — St. Mary's Syro Malabar",
+  "short_name": "Ward 4 Carol",
+  "description": "Two-day Christmas Carol navigation, live ETA schedule, offline route map, and bilingual songbook for Ward 4 (Kunjachan Ward), St. Mary's Syro Malabar Catholic Church.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#000000",
+  "theme_color": "#000000",
+  "categories": ["navigation", "lifestyle", "utilities"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icons/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

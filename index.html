@@ -1,0 +1,386 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="theme-color" content="#000000" />
+  <meta name="description" content="Ward 4 (Kunjachan Ward) Christmas Carol 2026 — St. Mary's Syro Malabar Catholic Church. Day 1 (Dec 12) & Day 2 (Dec 19) house-to-house navigation, live ETAs, offline route map & carol songbook." />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Ward 4 Carol" />
+
+  <title>Ward 4 Carol 2026 • St. Mary's Syro Malabar</title>
+
+  <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
+  <link rel="apple-touch-icon" href="./icons/icon-192.png" />
+  <link rel="manifest" href="./manifest.webmanifest" />
+  <link rel="stylesheet" href="./styles.css" />
+</head>
+<body>
+
+  <!-- Sticky Header -->
+  <header class="sticky-header">
+    <div class="header-inner">
+      <div class="header-top">
+        <div class="brand">
+          <div class="brand-icon" aria-hidden="true">🎄</div>
+          <div class="brand-title">
+            <h1>Ward 4 Carol • St. Mary's</h1>
+            <p id="header-subtitle">Kunjachan Ward • Gather 2:00 PM</p>
+          </div>
+        </div>
+        <div class="header-actions">
+          <button class="icon-btn" onclick="openSongbookModal()" title="Carol Songbook" aria-label="Carol Songbook">🎵</button>
+          <button id="btn-wakelock" class="icon-btn" onclick="toggleWakeLock()" title="Keep Screen Awake" aria-label="Keep Screen Awake">☀️</button>
+          <button id="btn-large-print" class="icon-btn" onclick="toggleLargePrint()" title="Large Print Driver Mode" aria-label="Large Print">Aa+</button>
+          <button class="icon-btn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙️</button>
+        </div>
+      </div>
+
+      <!-- Day 1 / Day 2 Switcher -->
+      <div class="day-switcher" role="tablist" aria-label="Select Carol Day">
+        <button id="tab-day1" class="day-tab active" role="tab" aria-selected="true" onclick="switchDay('day1')">
+          <span class="day-tab-title">🎄 Day 1 • Dec 12</span>
+          <span class="day-tab-sub" id="tab-day1-sub">2:00 PM • 13 Houses</span>
+        </button>
+        <button id="tab-day2" class="day-tab" role="tab" aria-selected="false" onclick="switchDay('day2')">
+          <span class="day-tab-title">⭐ Day 2 • Dec 19</span>
+          <span class="day-tab-sub" id="tab-day2-sub">2:30 PM • 12 Houses</span>
+        </button>
+      </div>
+
+      <!-- Live Metrics -->
+      <div class="metrics-grid">
+        <div class="metric-box">
+          <div class="metric-label">Visited</div>
+          <div class="metric-value mint" id="metric-progress">0 / 13</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Dinner ETA</div>
+          <div class="metric-value amber" id="metric-dinner-eta">--:--</div>
+        </div>
+        <div class="metric-box">
+          <div class="metric-label">Travel / Carol</div>
+          <div class="metric-value" id="metric-ratios">--m / --m</div>
+        </div>
+      </div>
+
+      <div class="progress-track">
+        <div class="progress-fill" id="progress-fill"></div>
+      </div>
+    </div>
+  </header>
+
+  <main class="container">
+    <!-- Install PWA Banner (shown automatically on supported browsers) -->
+    <div id="install-banner" class="install-banner">
+      <div class="install-banner-text">
+        📲 Install Ward 4 Carol App
+        <span>Works 100% offline on carol night</span>
+      </div>
+      <div class="install-banner-actions">
+        <button class="btn-install-now" onclick="triggerInstallPrompt()">Install</button>
+        <button class="btn-install-dismiss" onclick="dismissInstallBanner()">✕</button>
+      </div>
+    </div>
+
+    <!-- Collapsible Route Snapshot + Offline Interactive SVG Map -->
+    <section id="snapshot-bar" class="snapshot-bar">
+      <button class="snapshot-toggle" onclick="toggleSnapshot()" aria-expanded="false" id="snapshot-toggle-btn">
+        <span class="snapshot-summary-left">
+          <span>🗺️ Route Map &amp; Stops</span>
+          <span class="snapshot-miles" id="snapshot-miles-label">• 40.0 mi</span>
+        </span>
+        <span class="snapshot-summary-right" id="snapshot-chevron">Show Map ▾</span>
+      </button>
+      <div class="snapshot-body">
+        <div class="route-svg-wrap">
+          <div id="route-svg-container"></div>
+          <div class="route-svg-legend">
+            <span>Tap any pin to jump to house</span>
+            <div class="legend-dots">
+              <span class="legend-dot"><i style="background: var(--accent-mint);"></i>Done</span>
+              <span class="legend-dot"><i style="background: var(--accent-amber);"></i>Next</span>
+              <span class="legend-dot"><i style="background: var(--accent-crimson);"></i>Dinner</span>
+            </div>
+          </div>
+        </div>
+        <div id="bead-chain" class="bead-chain"></div>
+        <div id="snapshot-meta" class="snapshot-meta"></div>
+        <div id="snapshot-map-links" class="snapshot-map-links"></div>
+      </div>
+    </section>
+
+    <!-- Hero Spotlight: Next Stop -->
+    <div id="hero-spotlight"></div>
+
+    <!-- Live Controls -->
+    <div class="live-controls">
+      <button class="action-pill shift-now" onclick="shiftScheduleToNow()">
+        ⏱️ Shift to Now
+      </button>
+      <button class="action-pill share-eta" onclick="shareWhatsAppStatus()">
+        💬 WhatsApp ETA
+      </button>
+      <button class="action-pill add-house" onclick="openAddHouseModal()">
+        ➕ Add House
+      </button>
+      <button id="btn-gps" class="action-pill" onclick="toggleGpsTracking()">
+        📍 Near Me
+      </button>
+    </div>
+
+    <!-- Quick Search / Find My House -->
+    <div class="search-bar-wrap">
+      <span class="search-icon" aria-hidden="true">🔍</span>
+      <input
+        type="text"
+        id="search-input"
+        class="search-input"
+        placeholder="Find a family or street (e.g., Binoy, Matthews, Twin Lakes)..."
+        oninput="handleSearchInput(this.value)"
+        autocomplete="off"
+      />
+      <button id="search-clear" class="search-clear" onclick="clearSearch()" aria-label="Clear search">✕</button>
+    </div>
+
+    <!-- Completed & Upcoming Lists -->
+    <div id="completed-section"></div>
+    <div id="upcoming-section"></div>
+
+    <!-- Ward 4 Helpful Info Footer -->
+    <footer class="ward-footer">
+      <div class="ward-footer-title">⛪ St. Mary's Syro Malabar Catholic Church • Ward 4</div>
+      <div id="coordinator-info">
+        Tip: Tap any address to copy it, tap <strong>📍 Near Me</strong> when joining mid-route, or add this app to your Home Screen for offline use.
+      </div>
+      <div class="ward-footer-links">
+        <a id="footer-call-btn" class="footer-chip" href="#" style="display:none;">📞 Call Coordinator</a>
+        <a id="footer-sms-btn" class="footer-chip" href="#" style="display:none;">💬 Text Coordinator</a>
+        <button class="footer-chip" onclick="openImportModal()">✏️ Bulk Edit Stops</button>
+        <button class="footer-chip" onclick="openInstallHelpModal()">📲 Add to Home Screen</button>
+        <button class="footer-chip" onclick="openSongbookModal()">🎵 Songbook</button>
+      </div>
+    </footer>
+  </main>
+
+  <!-- Carol Songbook Modal -->
+  <div id="songbook-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'songbook-modal')">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2>🎵 Ward 4 Carol Songbook</h2>
+        <button class="close-btn" onclick="closeModal('songbook-modal')">✕</button>
+      </div>
+      <div class="song-toolbar">
+        <div class="song-font-btns">
+          <button class="icon-btn" onclick="adjustSongFont(-0.12)" title="Smaller text">A-</button>
+          <button class="icon-btn" onclick="adjustSongFont(0.12)" title="Larger text">A+</button>
+        </div>
+        <div class="song-font-btns">
+          <button id="btn-delete-song" class="icon-btn" onclick="deleteCurrentSong()" title="Delete Custom Song" style="display:none; color: var(--accent-crimson); border-color: var(--accent-crimson);">🗑️</button>
+          <button class="icon-btn" onclick="toggleAddSongPanel()">+ Add Song</button>
+        </div>
+      </div>
+      <div id="song-tabs" class="song-tabs"></div>
+      <div id="song-lyrics-box" class="song-lyrics-box"></div>
+
+      <div id="add-song-panel" class="add-song-panel">
+        <div class="form-group">
+          <label for="new-song-url">🔗 Import from Lyrics URL (Optional)</label>
+          <div style="display: flex; gap: 8px;">
+            <input type="url" id="new-song-url" placeholder="https://madely.us/lyrics/..." style="flex: 1;" />
+            <button id="btn-fetch-lyrics" class="btn-full btn-save" onclick="fetchLyricsFromUrl()" style="flex: 0 0 auto; min-width: 96px;">Fetch</button>
+          </div>
+          <div id="fetch-lyrics-status" class="helper-text">Paste a lyrics webpage link (e.g., madely.us) and tap Fetch to auto-fill Title &amp; Lyrics.</div>
+        </div>
+        <div class="form-group">
+          <label for="new-song-title">Song Title</label>
+          <input type="text" id="new-song-title" placeholder="e.g., Yahoodhiyayile Oru Gramathil" />
+        </div>
+        <div class="form-group">
+          <label for="new-song-lyrics">Lyrics</label>
+          <textarea id="new-song-lyrics" placeholder="Paste English or Malayalam lyrics here, or fetch from URL above..."></textarea>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-full btn-secondary" onclick="toggleAddSongPanel()">Cancel</button>
+          <button class="btn-full btn-save" onclick="saveNewSong()">Save to Songbook</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Settings Modal -->
+  <div id="settings-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'settings-modal')">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2 id="settings-modal-title">⚙️ Day 1 Settings</h2>
+        <button class="close-btn" onclick="closeModal('settings-modal')">✕</button>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="cfg-start-time">Gathering Start Time</label>
+          <input type="time" id="cfg-start-time" value="14:00" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-visit-mins">Default Mins / House</label>
+          <input type="number" id="cfg-visit-mins" min="5" max="120" value="20" />
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="cfg-nav-app">Primary Maps App</label>
+          <select id="cfg-nav-app">
+            <option value="google">Google Maps</option>
+            <option value="apple">Apple Maps</option>
+            <option value="waze">Waze</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="cfg-dinner-host">🔒 Final Dinner Host</label>
+          <select id="cfg-dinner-host"></select>
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="cfg-coord-name">Coordinator Name (Optional)</label>
+          <input type="text" id="cfg-coord-name" placeholder="e.g., Ward 4 Lead" />
+        </div>
+        <div class="form-group">
+          <label for="cfg-coord-phone">Coordinator Phone (Optional)</label>
+          <input type="tel" id="cfg-coord-phone" placeholder="e.g., 704-555-0123" />
+        </div>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-full btn-danger" onclick="resetProgress()">Reset Check-Ins</button>
+        <button class="btn-full btn-secondary" onclick="restoreDefaultDay()">Restore Defaults</button>
+        <button class="btn-full btn-save" onclick="saveSettings()">Save Settings</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Edit / Import Stops Modal -->
+  <div id="import-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'import-modal')">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2 id="import-modal-title">✏️ Edit or Import Stops</h2>
+        <button class="close-btn" onclick="closeModal('import-modal')">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label for="import-textarea">Stops List (Pipe-separated or JSON)</label>
+        <textarea id="import-textarea" spellcheck="false"></textarea>
+        <p class="helper-text">
+          Format: <code>Family Name | Address | TravelMins | Mode/Dist | Notes</code>
+        </p>
+      </div>
+
+      <div class="modal-footer">
+        <button class="btn-full btn-secondary" onclick="exportToCSV()">Copy List</button>
+        <button class="btn-full btn-save" onclick="applyImportedStops()">Apply &amp; Recalculate</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Inline Travel Leg Editor Modal -->
+  <div id="leg-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'leg-modal')">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2 id="leg-modal-title">🚗 Edit Travel Leg</h2>
+        <button class="close-btn" onclick="closeModal('leg-modal')">✕</button>
+      </div>
+      <input type="hidden" id="leg-stop-index" />
+      <div class="form-row">
+        <div class="form-group">
+          <label for="leg-drive-mins">Drive / Walk Time (Mins)</label>
+          <input type="number" id="leg-drive-mins" min="0" max="180" />
+        </div>
+        <div class="form-group">
+          <label for="leg-distance">Distance / Mode</label>
+          <input type="text" id="leg-distance" placeholder="2.4 mi drive" />
+        </div>
+      </div>
+      <div class="form-group">
+        <label for="leg-visit-mins">Caroling Duration (Mins)</label>
+        <input type="number" id="leg-visit-mins" min="5" max="180" />
+      </div>
+      <div class="modal-footer">
+        <button class="btn-full btn-save" onclick="saveLegEdit()">Update Stop</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Add Unplanned New House Modal -->
+  <div id="add-house-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'add-house-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true" aria-labelledby="add-house-title">
+      <div class="modal-header">
+        <h2 id="add-house-title">➕ Add Unplanned House</h2>
+        <button class="close-btn" onclick="closeModal('add-house-modal')">✕</button>
+      </div>
+
+      <div class="form-group">
+        <label for="add-family">Family Name *</label>
+        <input type="text" id="add-family" placeholder="e.g., Mathew &amp; Mini" />
+      </div>
+
+      <div class="form-group">
+        <label for="add-address">Full Street Address *</label>
+        <input type="text" id="add-address" placeholder="e.g., 10205 Rea Rd, Charlotte, NC 28277" />
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label for="add-placement">Best Path / Placement</label>
+          <select id="add-placement">
+            <option value="auto">🎯 Smart Best Route (Shortest Detour)</option>
+            <option value="next">⚡ Next Stop (Right Now)</option>
+            <option value="before-dinner">🍽️ Just Before Dinner Host</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="add-visit-mins">Caroling Time (Mins)</label>
+          <input type="number" id="add-visit-mins" min="5" max="120" value="20" />
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label for="add-notes">Notes (Optional)</label>
+        <input type="text" id="add-notes" placeholder="e.g., Added during carol • Apt / Gate code" />
+      </div>
+
+      <div id="add-house-status" class="helper-text" style="color: var(--accent-sky); margin-bottom: 6px;"></div>
+
+      <div class="modal-footer">
+        <button class="btn-full btn-secondary" onclick="closeModal('add-house-modal')">Cancel</button>
+        <button id="btn-add-house-submit" class="btn-full btn-save" onclick="submitNewHouse()">Find Best Spot &amp; Add</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Install / Add to Home Screen Guide Modal -->
+  <div id="install-help-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'install-help-modal')">
+    <div class="modal-sheet">
+      <div class="modal-header">
+        <h2>📲 Install Ward 4 Carol App</h2>
+        <button class="close-btn" onclick="closeModal('install-help-modal')">✕</button>
+      </div>
+      <div style="font-size: 0.92rem; color: var(--text-secondary); line-height: 1.55;">
+        <p style="margin-bottom: 12px;">Install this app on your phone so it opens full-screen and works <strong>even with weak signal</strong> during carol night:</p>
+        <p style="margin-bottom: 10px;"><strong style="color: var(--accent-amber);">iPhone / iPad (Safari):</strong><br/>1. Tap the <strong>Share</strong> icon (square with ↑ arrow) at the bottom.<br/>2. Scroll down and tap <strong>Add to Home Screen</strong>.<br/>3. Tap <strong>Add</strong>.</p>
+        <p><strong style="color: var(--accent-mint);">Android (Chrome):</strong><br/>1. Tap the <strong>⋮ Menu</strong> in the top-right corner.<br/>2. Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</p>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-full btn-save" onclick="closeModal('install-help-modal')">Got It</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+  <script src="./data.js" charset="UTF-8"></script>
+  <script src="./app.js" charset="UTF-8"></script>
+</body>
+</html>
