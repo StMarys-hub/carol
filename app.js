@@ -720,20 +720,19 @@ function shareWhatsAppStatus() {
   const next = computed.find((s) => !s.visited);
   const dinner = computed[computed.length - 1];
 
-  let msg = `🎄 *Ward 4- Blessed Kunjachan • Carol ${meta.shortLabel} (${meta.dateLabel})*\n`;
-  msg += `⛪ St. Mary's Syro Malabar Catholic Church\n`;
+  let msg = `🎄 Carol ${meta.shortLabel} - Update\n`;
   if (done.length > 0) {
     const lastDone = done[done.length - 1];
     msg += `✅ Completed: #${lastDone.index + 1} ${lastDone.family} (${done.length}/${computed.length})\n`;
   }
   if (next) {
-    msg += `🚗 Next Stop: #${next.index + 1} *${next.family}* (ETA ${next.arrivalFormatted})\n`;
-    msg += `${next.address}\n`;
+    msg += `🚗 Next Stop: #${next.index + 1} ${next.family} (ETA ${next.arrivalFormatted})\n`;
+    msg += `📍 ${next.address}\n`;
   } else {
     msg += `🎉 All houses completed!\n`;
   }
   if (dinner) {
-    msg += `🍽️ Dinner ETA (${dinner.family}): *${dinner.arrivalFormatted}*`;
+    msg += `🍽️ Final Stop ETA (${dinner.family}): ${dinner.arrivalFormatted}`;
   }
 
   // Always copy to clipboard first so user can also paste directly into 'Ward 4- Blessed Kunjachan'

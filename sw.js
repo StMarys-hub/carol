@@ -1,4 +1,4 @@
-const CACHE_NAME = "ward4-carol-pwa-v4";
+const CACHE_NAME = "ward4-carol-pwa-v5";
 const PRECACHE_ASSETS = [
   "./",
   "./index.html",
