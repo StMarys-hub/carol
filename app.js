@@ -29,15 +29,63 @@ let gpsWatchId = null;
 let userCoords = null;
 let wakeLockSentinel = null;
 
-// 20-Min House Countdown Timer
+// 20-Min House Countdown Timer (Wall-Clock Timestamp Based — Works When Locked/Minimized)
 let houseTimer = {
   stopId: null,
+  durationMins: 20,
   remainingSec: 20 * 60,
+  endTimeMs: null,
   running: false,
   intervalId: null,
   warned3Min: false,
   finished: false
 };
+
+function keyHouseTimer(wardId) {
+  return `carol_timer_${wardId}`;
+}
+
+function saveHouseTimerState() {
+  try {
+    localStorage.setItem(
+      keyHouseTimer(activeWardId),
+      JSON.stringify({
+        stopId: houseTimer.stopId,
+        durationMins: houseTimer.durationMins,
+        remainingSec: houseTimer.remainingSec,
+        endTimeMs: houseTimer.endTimeMs,
+        running: houseTimer.running,
+        warned3Min: houseTimer.warned3Min,
+        finished: houseTimer.finished
+      })
+    );
+  } catch (e) {}
+}
+
+function loadHouseTimerState(stopId, durationMins) {
+  try {
+    const raw = localStorage.getItem(keyHouseTimer(activeWardId));
+    if (raw) {
+      const saved = JSON.parse(raw);
+      if (saved && saved.stopId === stopId) {
+        houseTimer.stopId = saved.stopId;
+        houseTimer.durationMins = saved.durationMins || durationMins || 20;
+        houseTimer.endTimeMs = saved.endTimeMs || null;
+        houseTimer.running = !!saved.running;
+        houseTimer.warned3Min = !!saved.warned3Min;
+        houseTimer.finished = !!saved.finished;
+        houseTimer.remainingSec = saved.running && saved.endTimeMs
+          ? Math.max(0, Math.ceil((saved.endTimeMs - Date.now()) / 1000))
+          : (saved.remainingSec ?? (durationMins || 20) * 60);
+        if (houseTimer.running) {
+          startTimerLoop();
+        }
+        return true;
+      }
+    }
+  } catch (e) {}
+  return false;
+}
 
 // ---------- Ward Routing & Namespaced Storage ----------
 
@@ -356,9 +404,14 @@ function releaseWakeLock() {
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "hidden") {
     releaseWakeLock();
-  } else if (wardPayload) {
-    acquireWakeLockIfEnabled();
+  } else {
+    if (wardPayload) acquireWakeLockIfEnabled();
+    syncHouseTimerFromClock();
   }
+});
+
+window.addEventListener("focus", () => {
+  syncHouseTimerFromClock();
 });
 
 // ---------- Theme & Display Preferences ----------
@@ -610,18 +663,21 @@ function resetHouseTimer(stopId, durationMins) {
   if (houseTimer.intervalId) clearInterval(houseTimer.intervalId);
   houseTimer = {
     stopId,
+    durationMins: durationMins || 20,
     remainingSec: (durationMins || 20) * 60,
+    endTimeMs: null,
     running: false,
     intervalId: null,
     warned3Min: false,
     finished: false
   };
+  saveHouseTimerState();
 }
 
 function updateTimerButtonUI(durationMins) {
   const btn = document.getElementById("hero-timer-btn");
   if (!btn) return;
-  const dur = durationMins || 20;
+  const dur = durationMins || houseTimer.durationMins || 20;
   btn.classList.remove("running", "done");
   const mm = String(Math.floor(houseTimer.remainingSec / 60)).padStart(2, "0");
   const ss = String(houseTimer.remainingSec % 60).padStart(2, "0");
@@ -638,62 +694,106 @@ function updateTimerButtonUI(durationMins) {
   }
 }
 
+function triggerTimerFinished() {
+  houseTimer.remainingSec = 0;
+  houseTimer.running = false;
+  houseTimer.finished = true;
+  houseTimer.endTimeMs = null;
+  if (houseTimer.intervalId) {
+    clearInterval(houseTimer.intervalId);
+    houseTimer.intervalId = null;
+  }
+  saveHouseTimerState();
+  updateTimerButtonUI(houseTimer.durationMins);
+
+  const houses = getDayHouses(activeDayId);
+  const curIdx = houses.findIndex((h) => h.id === houseTimer.stopId);
+  const nextHouse = curIdx !== -1 ? houses.slice(curIdx + 1).find((h) => !h.visited) : null;
+  const nextNum = nextHouse ? houses.indexOf(nextHouse) + 1 : null;
+  const alertMsg = nextHouse
+    ? `🔔 Time's up! Please head to the next house: #${nextNum} ${nextHouse.family_name} 🚗`
+    : `🎉 Time's up at our final stop! Merry Christmas everyone! 🎄`;
+  const sentAt = new Date().toISOString();
+
+  if (realtimeChannel) {
+    realtimeChannel.send({
+      type: "broadcast",
+      event: "broadcast_alert",
+      payload: {
+        ward_id: activeWardId,
+        message: alertMsg,
+        pinned: false,
+        sent_at: sentAt
+      }
+    });
+  }
+
+  // Also show OS notification if permission was granted (alerts even if minimized)
+  if ("Notification" in window && Notification.permission === "granted") {
+    try {
+      new Notification("St. Mary's Christmas Carol", { body: alertMsg, icon: "./icons/icon-192.png" });
+    } catch (e) {}
+  }
+
+  showLiveBroadcastPopup(alertMsg, sentAt);
+  showToast(alertMsg);
+}
+
+function syncHouseTimerFromClock() {
+  if (!houseTimer.running || !houseTimer.endTimeMs) return;
+  const left = Math.max(0, Math.ceil((houseTimer.endTimeMs - Date.now()) / 1000));
+  houseTimer.remainingSec = left;
+
+  if (left <= 180 && left > 0 && !houseTimer.warned3Min) {
+    houseTimer.warned3Min = true;
+    saveHouseTimerState();
+    showToast("⏳ 3 mins left — wrap up & group photo!");
+    if (navigator.vibrate) navigator.vibrate(140);
+  }
+
+  if (left <= 0) {
+    triggerTimerFinished();
+    return;
+  }
+
+  updateTimerButtonUI(houseTimer.durationMins);
+}
+
+function startTimerLoop() {
+  if (houseTimer.intervalId) clearInterval(houseTimer.intervalId);
+  syncHouseTimerFromClock();
+  if (houseTimer.running) {
+    houseTimer.intervalId = setInterval(syncHouseTimerFromClock, 1000);
+  }
+}
+
 function toggleHouseTimer(stopId, durationMins) {
   if (houseTimer.stopId !== stopId || houseTimer.finished) {
     resetHouseTimer(stopId, durationMins);
   }
   if (houseTimer.running) {
-    clearInterval(houseTimer.intervalId);
+    syncHouseTimerFromClock();
+    if (houseTimer.intervalId) clearInterval(houseTimer.intervalId);
     houseTimer.intervalId = null;
     houseTimer.running = false;
+    houseTimer.endTimeMs = null;
+    saveHouseTimerState();
     updateTimerButtonUI(durationMins);
     showToast("Timer paused");
     return;
   }
+
+  // Request non-blocking notification permission so minimized tabs can alert
+  if ("Notification" in window && Notification.permission === "default") {
+    Notification.requestPermission().catch(() => {});
+  }
+
+  houseTimer.durationMins = durationMins || houseTimer.durationMins || 20;
   houseTimer.running = true;
-  houseTimer.intervalId = setInterval(() => {
-    houseTimer.remainingSec -= 1;
-    if (houseTimer.remainingSec === 180 && !houseTimer.warned3Min) {
-      houseTimer.warned3Min = true;
-      showToast("⏳ 3 mins left — wrap up & group photo!");
-      if (navigator.vibrate) navigator.vibrate(140);
-    }
-    if (houseTimer.remainingSec <= 0) {
-      houseTimer.remainingSec = 0;
-      houseTimer.running = false;
-      houseTimer.finished = true;
-      clearInterval(houseTimer.intervalId);
-      houseTimer.intervalId = null;
-
-      // Determine next house and auto-broadcast to all connected carolers
-      const houses = getDayHouses(activeDayId);
-      const curIdx = houses.findIndex((h) => h.id === stopId);
-      const nextHouse = curIdx !== -1 ? houses.slice(curIdx + 1).find((h) => !h.visited) : null;
-      const nextNum = nextHouse ? houses.indexOf(nextHouse) + 1 : null;
-      const alertMsg = nextHouse
-        ? `🔔 Time's up! Please head to the next house: #${nextNum} ${nextHouse.family_name} 🚗`
-        : `🎉 Time's up at our final stop! Merry Christmas everyone! 🎄`;
-      const sentAt = new Date().toISOString();
-
-      if (realtimeChannel) {
-        realtimeChannel.send({
-          type: "broadcast",
-          event: "broadcast_alert",
-          payload: {
-            ward_id: activeWardId,
-            message: alertMsg,
-            pinned: false,
-            sent_at: sentAt
-          }
-        });
-      }
-      showLiveBroadcastPopup(alertMsg, sentAt);
-      showToast(alertMsg);
-    }
-    updateTimerButtonUI(durationMins);
-  }, 1000);
-  updateTimerButtonUI(durationMins);
-  showToast(`⏱️ Started ${durationMins}-min carol timer`);
+  houseTimer.endTimeMs = Date.now() + houseTimer.remainingSec * 1000;
+  saveHouseTimerState();
+  startTimerLoop();
+  showToast(`⏱️ Started ${houseTimer.durationMins}-min carol timer`);
 }
 
 // ---------- Main Dashboard Render ----------
@@ -772,7 +872,9 @@ function render() {
     `;
   } else if (currentStop) {
     if (houseTimer.stopId !== currentStop.id) {
-      resetHouseTimer(currentStop.id, currentStop.duration);
+      if (!loadHouseTimerState(currentStop.id, currentStop.duration)) {
+        resetHouseTimer(currentStop.id, currentStop.duration);
+      }
     }
     const navUrl = getNavUrl(currentStop.address, currentStop.lat, currentStop.lng);
     const isWalk = (currentStop.distance_label || "").toLowerCase().includes("walk");
