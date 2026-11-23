@@ -664,8 +664,31 @@ function toggleHouseTimer(stopId, durationMins) {
       houseTimer.finished = true;
       clearInterval(houseTimer.intervalId);
       houseTimer.intervalId = null;
-      playSoftChime();
-      showToast("🔔 Time's up — head to the next house!");
+
+      // Determine next house and auto-broadcast to all connected carolers
+      const houses = getDayHouses(activeDayId);
+      const curIdx = houses.findIndex((h) => h.id === stopId);
+      const nextHouse = curIdx !== -1 ? houses.slice(curIdx + 1).find((h) => !h.visited) : null;
+      const nextNum = nextHouse ? houses.indexOf(nextHouse) + 1 : null;
+      const alertMsg = nextHouse
+        ? `🔔 Time's up! Please head to the next house: #${nextNum} ${nextHouse.family_name} 🚗`
+        : `🎉 Time's up at our final stop! Merry Christmas everyone! 🎄`;
+      const sentAt = new Date().toISOString();
+
+      if (realtimeChannel) {
+        realtimeChannel.send({
+          type: "broadcast",
+          event: "broadcast_alert",
+          payload: {
+            ward_id: activeWardId,
+            message: alertMsg,
+            pinned: false,
+            sent_at: sentAt
+          }
+        });
+      }
+      showLiveBroadcastPopup(alertMsg, sentAt);
+      showToast(alertMsg);
     }
     updateTimerButtonUI(durationMins);
   }, 1000);
@@ -2013,7 +2036,7 @@ function copyWhatsAppWardInvite() {
   const w = CFG.WARDS[activeWardId];
   const groupName = (wardPayload && wardPayload.ward_settings && wardPayload.ward_settings.whatsapp_group_name) || w.defaultWaGroup;
   const link = `${CFG.publicBaseUrl}?ward=${activeWardId}`;
-  const msg = `🎄 *${w.full} — Christmas Carol App*\n⛪ ${CFG.churchName}\n\n📲 Open App: ${link}\n🔑 Ward Access Code: *${code}*\n\n(Enter once on your phone & tap Add to Home Screen for live ETAs, Navigation & Songbook!)`;
+  const msg = `🎄 *St. Mary's Christmas Carol - Schedule and route*\n${w.full}\n\n📲 Open App: ${link}\n🔑 Ward Access Code: *${code}*\n\n(Enter once on your phone & tap Add to Home Screen for live ETAs, Navigation & Songbook!)`;
   copyText(msg, `Copied! Select "${groupName}" in WhatsApp`);
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
