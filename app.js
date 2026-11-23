@@ -2032,11 +2032,14 @@ async function clonePreviousYear() {
 
 async function saveAdminWardSettings() {
   const prev = (wardPayload && wardPayload.ward_settings) || {};
+  const newVisitMins = Math.max(1, parseInt(document.getElementById("adm-visit-mins").value, 10) || 20);
+  const oldVisitMins = Number(prev.default_visit_mins) || 20;
+
   const { data } = await sbClient.rpc("admin_save_ward_settings", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code,
     p_settings: {
-      default_visit_mins: parseInt(document.getElementById("adm-visit-mins").value, 10) || 20,
+      default_visit_mins: newVisitMins,
       drive_buffer_mins: prev.drive_buffer_mins || 5,
       coordinator_name: document.getElementById("adm-coord-name").value.trim(),
       coordinator_phone: document.getElementById("adm-coord-phone").value.trim(),
@@ -2044,9 +2047,51 @@ async function saveAdminWardSettings() {
       instructions_banner: document.getElementById("adm-banner").value.trim()
     }
   });
+
   if (data && data.ok) {
+    // Sync new Mins / House across all active season days & non-END houses so ETAs & Route Timer match immediately
+    if (newVisitMins !== oldVisitMins && wardPayload && wardPayload.active_season) {
+      const days = getDays();
+      for (const d of days) {
+        await sbClient.rpc("admin_upsert_carol_day", {
+          p_ward_id: activeWardId,
+          p_admin_code: adminSession.code,
+          p_season_id: d.season_id,
+          p_day_id: d.id,
+          p_day_number: d.day_number,
+          p_label: d.label,
+          p_carol_date: d.carol_date || null,
+          p_start_time: d.start_time || "14:00",
+          p_avg_visit_mins: newVisitMins,
+          p_drive_buffer_mins: d.drive_buffer_mins || 5
+        });
+
+        const dayHouses = getDayHouses(d.id);
+        if (dayHouses.length > 0) {
+          const updatedHouses = dayHouses.map((h) => ({
+            ...h,
+            visit_mins: h.stop_role === "END" ? h.visit_mins : newVisitMins
+          }));
+          await sbClient.rpc("admin_save_house_order", {
+            p_ward_id: activeWardId,
+            p_admin_code: adminSession.code,
+            p_carol_day_id: d.id,
+            p_ordered_houses: updatedHouses
+          });
+        }
+      }
+
+      // Reset idle timer so Hero button immediately reflects the new Mins / House
+      if (!houseTimer.running) {
+        localStorage.removeItem(keyHouseTimer(activeWardId));
+        houseTimer.stopId = null;
+      }
+      broadcastPiiFreeEtaShift(activeDayId, 0, new Date().toISOString());
+    }
+
     await syncActiveWardOnline(true);
-    showToast("Ward info saved!");
+    populateAdminControls();
+    showToast(`Ward info saved (${newVisitMins}m/house synced)!`);
   }
 }
 
