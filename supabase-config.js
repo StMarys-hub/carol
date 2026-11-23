@@ -8,9 +8,9 @@ window.CAROL_APP_CONFIG = {
   basePath: "/carol/",
   publicBaseUrl: "https://stmarys-hub.github.io/carol/",
 
-  // Paste your Supabase Project URL and public Anon Key here:
-  SUPABASE_URL: "",
-  SUPABASE_ANON_KEY: "",
+  // Dedicated `stmarys-carol` Supabase Project URL and public Anon Key:
+  SUPABASE_URL: "https://cdjspobojdzdzwucxhjx.supabase.co",
+  SUPABASE_ANON_KEY: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNkanNwb2JvamR6ZHp3dWN4aGp4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTU0NDk0NTcsImV4cCI6MjExMTAyNTQ1N30.GeGH0tQoe5T7tYdKAIoOM351HT_lBC9NyX5cFUcsxb8",
 
   // Central 5-Ward Registry
   WARDS: {

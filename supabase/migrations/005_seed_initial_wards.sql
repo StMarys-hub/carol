@@ -1,7 +1,11 @@
 -- ============================================================================
--- Migration 002: Initialize All 5 Wards (W1–W5) & Migrate Ward 4 (2026) Data
--- IMPORTANT: Replace the initial placeholder access/admin codes below BEFORE
---            running in production (or rotate immediately in Admin -> Security).
+-- St. Mary's Syro Malabar Catholic Church — Multi-Ward Christmas Carol (W1–W5)
+-- Migration 005: Safe Initial Seed for W1–W5 + MASTER & Ward 4 (2026) Schedule
+-- Idempotent: Safe to re-run — will NOT overwrite existing codes or house lists
+--
+-- IMPORTANT BEFORE RUNNING IN PRODUCTION:
+--   Replace the placeholder user/admin codes in Section 2 below, OR rotate them
+--   immediately inside the app via: 🔐 Admin → Security.
 -- ============================================================================
 
 -- 1. Seed Default Ward Settings for W1–W5
@@ -14,7 +18,7 @@ VALUES
   ('W5', 2026, 20, 5, 'Ward 5- St. Michael')
 ON CONFLICT (ward_id) DO NOTHING;
 
--- 2. Seed Hashed Access Codes (bcrypt via pgcrypto — change these before running!)
+-- 2. Seed Hashed Access Codes (bcrypt via pgcrypto — change before production!)
 INSERT INTO public.ward_access_codes (ward_id, user_code_hash, admin_code_hash)
 VALUES
   ('W1',     crypt('1001', gen_salt('bf')), crypt('W1-ADMIN-2026', gen_salt('bf'))),

@@ -1,154 +1,13 @@
 -- ============================================================================
 -- St. Mary's Syro Malabar Catholic Church — Multi-Ward Christmas Carol (W1–W5)
--- Migration 001: Multi-Tenant Schema, Strict RLS Lockdown & Gatekeeper RPCs
+-- Migration 004: Internal Security Helpers & Gatekeeper / Admin RPCs
 -- Idempotent: Safe to re-run
 -- ============================================================================
 
-CREATE EXTENSION IF NOT EXISTS pgcrypto;
+-- ============================================================================
+-- 1. INTERNAL SECURITY HELPERS (Not callable by anon / authenticated)
+-- ============================================================================
 
--- 1. Core Tables
-CREATE TABLE IF NOT EXISTS public.carol_seasons (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ward_id text NOT NULL DEFAULT 'W4' CHECK (ward_id IN ('W1','W2','W3','W4','W5')),
-  year int NOT NULL,
-  name text NOT NULL,
-  is_active boolean NOT NULL DEFAULT false,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (ward_id, year)
-);
-
-CREATE TABLE IF NOT EXISTS public.carol_days (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ward_id text NOT NULL DEFAULT 'W4' CHECK (ward_id IN ('W1','W2','W3','W4','W5')),
-  season_id uuid NOT NULL REFERENCES public.carol_seasons(id) ON DELETE CASCADE,
-  day_number int NOT NULL DEFAULT 1,
-  label text NOT NULL,
-  carol_date date,
-  start_time text NOT NULL DEFAULT '14:00',
-  avg_visit_mins int NOT NULL DEFAULT 20,
-  drive_buffer_mins int NOT NULL DEFAULT 5,
-  current_stop_index int NOT NULL DEFAULT 0,
-  last_actual_timestamp timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (season_id, day_number)
-);
-
-CREATE TABLE IF NOT EXISTS public.ward_houses (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ward_id text NOT NULL DEFAULT 'W4' CHECK (ward_id IN ('W1','W2','W3','W4','W5')),
-  season_id uuid NOT NULL REFERENCES public.carol_seasons(id) ON DELETE CASCADE,
-  carol_day_id uuid NOT NULL REFERENCES public.carol_days(id) ON DELETE CASCADE,
-  family_name text NOT NULL,
-  address text NOT NULL,
-  lat double precision,
-  lng double precision,
-  phone text DEFAULT '',
-  notes text DEFAULT '',
-  stop_role text CHECK (stop_role IN ('START','END') OR stop_role IS NULL),
-  stop_order int NOT NULL DEFAULT 0,
-  drive_mins int NOT NULL DEFAULT 5,
-  distance_label text DEFAULT '',
-  visit_mins int NOT NULL DEFAULT 20,
-  visited boolean NOT NULL DEFAULT false,
-  checked_in_at timestamptz,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS public.ward_settings (
-  ward_id text PRIMARY KEY CHECK (ward_id IN ('W1','W2','W3','W4','W5')),
-  active_year int NOT NULL DEFAULT 2026,
-  default_visit_mins int NOT NULL DEFAULT 20,
-  drive_buffer_mins int NOT NULL DEFAULT 5,
-  meeting_point text DEFAULT '',
-  instructions_banner text DEFAULT '',
-  coordinator_name text DEFAULT '',
-  coordinator_phone text DEFAULT '',
-  whatsapp_group_name text DEFAULT '',
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS public.ward_songs (
-  id uuid PRIMARY KEY DEFAULT gen_random_uuid(),
-  ward_id text NOT NULL DEFAULT 'W4' CHECK (ward_id IN ('W1','W2','W3','W4','W5')),
-  title text NOT NULL,
-  lang text NOT NULL DEFAULT 'Malayalam',
-  lyrics text NOT NULL,
-  karaoke_audio_url text DEFAULT '',
-  source_url text DEFAULT '',
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
--- Private Access Codes Table (Zero public policies)
-CREATE TABLE IF NOT EXISTS public.ward_access_codes (
-  ward_id text PRIMARY KEY CHECK (ward_id IN ('W1','W2','W3','W4','W5','MASTER')),
-  user_code_hash text,
-  user_code_version int NOT NULL DEFAULT 1,
-  admin_code_hash text NOT NULL,
-  updated_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS public.admin_audit_logs (
-  id bigserial PRIMARY KEY,
-  ward_id text NOT NULL,
-  actor_role text NOT NULL,
-  action text NOT NULL,
-  details jsonb DEFAULT '{}'::jsonb,
-  created_at timestamptz NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS public.auth_rate_limits (
-  id bigserial PRIMARY KEY,
-  ward_id text NOT NULL,
-  attempt_type text NOT NULL,
-  attempted_at timestamptz NOT NULL DEFAULT now()
-);
-
--- Indexes for fast per-ward queries
-CREATE INDEX IF NOT EXISTS idx_carol_days_ward_season ON public.carol_days (ward_id, season_id, day_number);
-CREATE INDEX IF NOT EXISTS idx_ward_houses_day_order ON public.ward_houses (ward_id, carol_day_id, stop_order);
-CREATE INDEX IF NOT EXISTS idx_ward_songs_ward ON public.ward_songs (ward_id, created_at);
-CREATE INDEX IF NOT EXISTS idx_rate_limits_lookup ON public.auth_rate_limits (ward_id, attempt_type, attempted_at DESC);
-
--- 2. Strict RLS Lockdown — ZERO Public Direct Table Reads/Writes
-ALTER TABLE public.carol_seasons ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.carol_days ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ward_houses ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ward_settings ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ward_songs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.ward_access_codes ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.admin_audit_logs ENABLE ROW LEVEL SECURITY;
-ALTER TABLE public.auth_rate_limits ENABLE ROW LEVEL SECURITY;
-
--- Drop any legacy permissive policies if migrating from carol-w4
-DO $$
-DECLARE
-  pol record;
-BEGIN
-  FOR pol IN
-    SELECT schemaname, tablename, policyname
-    FROM pg_policies
-    WHERE schemaname = 'public'
-      AND tablename IN (
-        'carol_seasons','carol_days','ward_houses','ward_settings',
-        'ward_songs','ward_access_codes','admin_audit_logs','auth_rate_limits'
-      )
-  LOOP
-    EXECUTE format('DROP POLICY IF EXISTS %I ON %I.%I', pol.policyname, pol.schemaname, pol.tablename);
-  END LOOP;
-END $$;
-
-REVOKE ALL ON TABLE
-  public.carol_seasons,
-  public.carol_days,
-  public.ward_houses,
-  public.ward_settings,
-  public.ward_songs,
-  public.ward_access_codes,
-  public.admin_audit_logs,
-  public.auth_rate_limits
-FROM anon, authenticated;
-
--- 3. Internal Security Helpers (Not granted to anon/authenticated)
 CREATE OR REPLACE FUNCTION public._check_rate_limit(p_ward_id text, p_attempt_type text)
 RETURNS boolean
 LANGUAGE plpgsql
@@ -213,11 +72,14 @@ BEGIN
 END;
 $$;
 
-REVOKE ALL ON FUNCTION public._check_rate_limit(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public._log_failed_attempt(text, text) FROM PUBLIC;
-REVOKE ALL ON FUNCTION public._assert_ward_admin(text, text) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public._check_rate_limit(text, text)   FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._log_failed_attempt(text, text) FROM PUBLIC, anon, authenticated;
+REVOKE ALL ON FUNCTION public._assert_ward_admin(text, text)  FROM PUBLIC, anon, authenticated;
 
--- 4. Public Gatekeeper RPC: Parishioner Read Access
+-- ============================================================================
+-- 2. PARISHIONER READ GATEKEEPER RPC
+-- ============================================================================
+
 CREATE OR REPLACE FUNCTION public.get_ward_carol_data(p_ward_id text, p_user_code text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -285,7 +147,13 @@ BEGIN
 END;
 $$;
 
--- 5. Admin Verification & Security RPCs
+COMMENT ON FUNCTION public.get_ward_carol_data(text, text) IS
+  'Sole parishioner read endpoint: verifies ward user code (bcrypt + rate-limited) and returns scoped season, days, houses, settings, and songs.';
+
+-- ============================================================================
+-- 3. ADMIN VERIFICATION & SECURITY RPCS
+-- ============================================================================
+
 CREATE OR REPLACE FUNCTION public.verify_ward_admin_code(p_ward_id text, p_admin_code text)
 RETURNS jsonb
 LANGUAGE plpgsql
@@ -367,7 +235,10 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 6. Admin Write RPCs (Strictly Scoped to p_ward_id)
+-- ============================================================================
+-- 4. ADMIN WRITE RPCS (Strictly Scoped to p_ward_id)
+-- ============================================================================
+
 CREATE OR REPLACE FUNCTION public.admin_upsert_season(
   p_ward_id text,
   p_admin_code text,
@@ -481,6 +352,9 @@ EXCEPTION WHEN OTHERS THEN
   RETURN jsonb_build_object('ok', false, 'error', SQLERRM);
 END;
 $$;
+
+COMMENT ON FUNCTION public.admin_clone_previous_season(text, text, int, int) IS
+  'One-click multi-year rollover: clones all carol_days and ward_houses from p_from_year to p_to_year with visited=false.';
 
 CREATE OR REPLACE FUNCTION public.admin_upsert_carol_day(
   p_ward_id text,
@@ -780,7 +654,10 @@ EXCEPTION WHEN OTHERS THEN
 END;
 $$;
 
--- 7. Grant Execute ONLY on Gatekeeper RPCs
+-- ============================================================================
+-- 5. LEAST-PRIVILEGE GRANTS (Execute ONLY on the 13 Gatekeeper/Admin RPCs)
+-- ============================================================================
+
 GRANT EXECUTE ON FUNCTION public.get_ward_carol_data(text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.verify_ward_admin_code(text, text) TO anon, authenticated;
 GRANT EXECUTE ON FUNCTION public.reset_ward_user_code(text, text, text) TO anon, authenticated;

@@ -12,15 +12,20 @@ Live Multi-Ward PWA: **https://stmarys-hub.github.io/carol/**
 - **Ward 5 – St. Michael**: `https://stmarys-hub.github.io/carol/?ward=W5`
 
 ## Supabase Backend Setup (5 Minutes)
-1. **Run SQL Migrations** in your Supabase SQL Editor in order:
-   - `supabase/migrations/001_multi_ward_carol.sql` — Creates all tables (`carol_seasons`, `carol_days`, `ward_houses`, `ward_settings`, `ward_songs`, `ward_access_codes`, `admin_audit_logs`, `auth_rate_limits`), enables strict RLS with **zero public `SELECT` policies on PII tables**, and installs all rate-limited `SECURITY DEFINER` RPCs.
-   - `supabase/migrations/002_seed_ward4_2026.sql` — Initializes Wards `W1`–`W5` and safely migrates all 25 Ward 4 2026 houses (`Day 1: Dec 12` & `Day 2: Dec 19`) into `W4`. *(Change the initial placeholder codes before running, or rotate immediately inside **🔐 Admin → Security**.)*
+See [supabase/SETUP_GUIDE.md](supabase/SETUP_GUIDE.md) for the full isolation architecture (`stmarys-carol` dedicated project vs. `carol` schema fallback), ASCII ERD, and 5-point zero-impact verification checklist.
+
+1. **Run Modular SQL Migrations** in your `stmarys-carol` Supabase SQL Editor in order:
+   - `supabase/migrations/001_extensions_and_helpers.sql` — Enables `pgcrypto` and installs the shared `set_updated_at()` trigger function.
+   - `supabase/migrations/002_core_tables.sql` — Creates `carol_seasons`, `carol_days`, `ward_houses`, `ward_settings`, `ward_songs`, indexes, `updated_at` triggers, and `COMMENT ON` table documentation.
+   - `supabase/migrations/003_security_and_access.sql` — Creates `ward_access_codes`, `admin_audit_logs`, `auth_rate_limits`, enables strict RLS on all 8 tables with **zero public `SELECT` policies**, and revokes direct table access from `anon`/`authenticated`.
+   - `supabase/migrations/004_rpcs_and_triggers.sql` — Installs private security helpers and grants `EXECUTE` on all 13 rate-limited `SECURITY DEFINER` RPCs.
+   - `supabase/migrations/005_seed_initial_wards.sql` — Initializes Wards `W1`–`W5` + `MASTER` and safely migrates all 25 Ward 4 2026 houses (`Day 1: Dec 12` & `Day 2: Dec 19`) into `W4`. *(Change the initial placeholder codes before running, or rotate immediately inside **🔐 Admin → Security**.)*
 2. **Optional Edge Function (CORS-safe `madely.us` Lyrics + Audio-Only Karaoke Extractor)**:
    ```bash
    supabase functions deploy madely-lyrics --no-verify-jwt
    ```
 3. **Connect Frontend**:
-   - Paste your `SUPABASE_URL` and public `SUPABASE_ANON_KEY` into `supabase-config.js` (or configure directly in-app via **⚙️ Settings → Connect Supabase**).
+   - Paste your `stmarys-carol` `SUPABASE_URL` and public `SUPABASE_ANON_KEY` into `supabase-config.js` (or configure directly in-app via **⚙️ Settings → Connect Supabase**).
 
 ## Architecture & Key Features
 - **Dual-Layer Security**: Zero hardcoded codes or PII in frontend code. Parishioners enter their Ward Access Code once per season (cached per ward; auto-revoked if Admin resets the code). Independent Admin Code per ward (`W1`–`W5`) + `MASTER` override.
