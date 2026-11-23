@@ -1,7 +1,7 @@
 # Ward 4 Christmas Carol 2026 PWA
 **St. Mary's Syro Malabar Catholic Church — Ward 4 (Blessed Kunjachan Ward)**
 
-Live PWA: **https://stmarys-hub.github.io/carol/**
+Live PWA: **https://stmarys-hub.github.io/carol-w4/**
 
 ## Features
 - **Day 1 (Sat, Dec 12 • 2:00 PM • 13 Houses)** & **Day 2 (Sat, Dec 19 • 2:30 PM • 12 Houses)** with independent saved progress.
