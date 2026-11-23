@@ -519,19 +519,6 @@ function render() {
   document.getElementById("snapshot-meta").innerHTML = `<strong>${meta.shortLabel} Route:</strong> ${escapeHtml(meta.routeSummary)}`;
   document.getElementById("snapshot-map-links").innerHTML = buildMultiStopGoogleMapsLinks(computed);
 
-  document.getElementById("bead-chain").innerHTML = computed
-    .map((s, idx) => {
-      const dotClass = s.visited ? "done" : idx === nextIndex ? "current" : s.isLast ? "dinner" : "";
-      const lineClass = s.visited ? "done" : "";
-      return `
-        <div class="bead-item">
-          <div class="bead-dot ${dotClass}" onclick="jumpToStop('${s.id}')" title="#${idx + 1} ${escapeHtml(s.family)}">${s.isLast ? "🍽️" : idx + 1}</div>
-          ${idx < computed.length - 1 ? `<div class="bead-line ${lineClass}"></div>` : ""}
-        </div>
-      `;
-    })
-    .join("");
-
   // Hero Spotlight
   const heroEl = document.getElementById("hero-spotlight");
   if (nextStop) {
