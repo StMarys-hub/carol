@@ -109,6 +109,123 @@ let wakeLockSentinel = null;
 let gpsWatchId = null;
 let userCoords = null;
 
+// 20-Min House Caroling Timer state
+let houseTimer = {
+  stopId: null,
+  remainingSec: 20 * 60,
+  running: false,
+  intervalId: null,
+  warned3Min: false,
+  finished: false
+};
+
+function playSoftChime() {
+  try {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) return;
+    const ctx = new AudioCtx();
+    [523.25, 659.25, 783.99].forEach((freq, i) => {
+      const osc = ctx.createOscillator();
+      const gain = ctx.createGain();
+      osc.type = "sine";
+      osc.frequency.value = freq;
+      gain.gain.setValueAtTime(0.14, ctx.currentTime + i * 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + i * 0.16 + 0.35);
+      osc.connect(gain);
+      gain.connect(ctx.destination);
+      osc.start(ctx.currentTime + i * 0.16);
+      osc.stop(ctx.currentTime + i * 0.16 + 0.36);
+    });
+  } catch (e) {}
+  if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
+}
+
+function formatTimerMMSS(sec) {
+  const s = Math.max(0, Math.floor(sec));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
+}
+
+function resetHouseTimer(stopId, durationMins) {
+  if (houseTimer.intervalId) clearInterval(houseTimer.intervalId);
+  houseTimer = {
+    stopId,
+    remainingSec: (durationMins || 20) * 60,
+    running: false,
+    intervalId: null,
+    warned3Min: false,
+    finished: false
+  };
+}
+
+function updateTimerButtonUI() {
+  const btn = document.getElementById("hero-timer-btn");
+  if (!btn) return;
+  btn.classList.remove("running", "warn", "done");
+  if (houseTimer.finished) {
+    btn.classList.add("done");
+    btn.textContent = "🔔 00:00 • Reset";
+  } else if (houseTimer.running) {
+    btn.classList.add(houseTimer.remainingSec <= 180 ? "warn" : "running");
+    btn.textContent = `⏱️ ${formatTimerMMSS(houseTimer.remainingSec)}`;
+  } else if (houseTimer.remainingSec < (currentHeroDurationMins() * 60)) {
+    btn.textContent = `▶ ${formatTimerMMSS(houseTimer.remainingSec)}`;
+  } else {
+    btn.textContent = `⏱️ ${currentHeroDurationMins()}m Timer`;
+  }
+}
+
+function currentHeroDurationMins() {
+  const daySt = currentDayState();
+  const next = daySt.stops.find((s) => !s.visited);
+  return next ? Number(next.visitMins) || daySt.defaultVisitMins || 20 : 20;
+}
+
+function toggleHouseTimer(stopId, durationMins) {
+  if (houseTimer.stopId !== stopId || houseTimer.finished) {
+    resetHouseTimer(stopId, durationMins);
+  }
+  if (houseTimer.running) {
+    clearInterval(houseTimer.intervalId);
+    houseTimer.intervalId = null;
+    houseTimer.running = false;
+    updateTimerButtonUI();
+    showToast("House timer paused");
+    return;
+  }
+  houseTimer.running = true;
+  houseTimer.intervalId = setInterval(() => {
+    houseTimer.remainingSec -= 1;
+    if (houseTimer.remainingSec === 180 && !houseTimer.warned3Min) {
+      houseTimer.warned3Min = true;
+      showToast("⏳ 3 mins left — wrap up & group photo!");
+      if (navigator.vibrate) navigator.vibrate(150);
+    }
+    if (houseTimer.remainingSec <= 0) {
+      houseTimer.remainingSec = 0;
+      houseTimer.running = false;
+      houseTimer.finished = true;
+      clearInterval(houseTimer.intervalId);
+      houseTimer.intervalId = null;
+      playSoftChime();
+      showToast("🔔 20 mins up — time to head to the next house!");
+    }
+    updateTimerButtonUI();
+  }, 1000);
+  updateTimerButtonUI();
+  showToast(`⏱️ Started ${durationMins}-min carol timer`);
+}
+
+function sendHostHeadsUp(family, etaStr) {
+  const msg = `🎄 Hi ${family}! Ward 4 Carol is on the way — our current ETA to your home is ${etaStr}. See you soon! 🎶`;
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(msg).catch(() => {});
+  }
+  showToast(`Heads-up copied for ${family}!`);
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
+}
+
 function currentDayMeta() {
   return window.CAROL_DATA.days[state.activeDay];
 }
@@ -522,6 +639,9 @@ function render() {
   // Hero Spotlight
   const heroEl = document.getElementById("hero-spotlight");
   if (nextStop) {
+    if (houseTimer.stopId !== nextStop.id) {
+      resetHouseTimer(nextStop.id, nextStop.duration);
+    }
     const nav = getNavUrls(nextStop.address, nextStop.lat, nextStop.lng);
     const isWalk = (nextStop.distance || "").toLowerCase().includes("walk");
     const distHtml =
@@ -543,17 +663,18 @@ function render() {
         ${nextStop.notes ? `<div class="hero-notes">${escapeHtml(nextStop.notes)}</div>` : ""}
         <div class="hero-actions">
           <a class="btn-car btn-go-primary" href="${nav.primaryUrl}" target="_blank" rel="noopener">
-            ${isWalk ? "🚶 Walk" : "🧭 GO"} (${nav.primaryLabel.split(" ")[0]})
+            ${isWalk ? "🚶 Walk" : "🧭 Navigate"}
           </a>
-          <a class="btn-car btn-go-alt" href="${nav.altUrl}" target="_blank" rel="noopener">
-            ${nav.altLabel}
-          </a>
+          <button id="hero-timer-btn" class="btn-car btn-timer-hero" onclick="toggleHouseTimer('${nextStop.id}', ${nextStop.duration})">
+            ⏱️ ${nextStop.duration}m Timer
+          </button>
           <button class="btn-car btn-checkin-hero" onclick="toggleVisited('${nextStop.id}')">
             ✓ Arrived
           </button>
         </div>
       </section>
     `;
+    updateTimerButtonUI();
   } else {
     heroEl.innerHTML = `
       <section class="hero-card" style="border-color: var(--accent-mint); background: #051b14;">
@@ -656,8 +777,8 @@ function render() {
               </div>
               ${stop.notes ? `<div class="notes-line">${escapeHtml(stop.notes)}</div>` : ""}
               <div class="card-actions">
-                <a class="nav-btn gmaps" href="${nav.primaryUrl}" target="_blank" rel="noopener">🧭 ${nav.primaryLabel.split(" ")[0]}</a>
-                <a class="nav-btn" href="${nav.altUrl}" target="_blank" rel="noopener">${nav.altLabel}</a>
+                <a class="nav-btn gmaps" href="${nav.primaryUrl}" target="_blank" rel="noopener">${isWalk ? "🚶 Walk" : "🧭 Navigate"}</a>
+                <button class="nav-btn headsup" onclick="sendHostHeadsUp('${escapeJs(stop.family)}', '${escapeJs(stop.arrivalFormatted)}')">📲 Heads-Up</button>
                 <button class="checkin-btn" onclick="toggleVisited('${stop.id}')">✓ Check In</button>
               </div>
             </article>
