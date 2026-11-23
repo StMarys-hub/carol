@@ -2011,9 +2011,11 @@ async function resetWardUserCode() {
 function copyWhatsAppWardInvite() {
   const code = document.getElementById("sec-new-user-code").value.trim() || localStorage.getItem(keyUserCode(activeWardId)) || "[CODE]";
   const w = CFG.WARDS[activeWardId];
+  const groupName = (wardPayload && wardPayload.ward_settings && wardPayload.ward_settings.whatsapp_group_name) || w.defaultWaGroup;
   const link = `${CFG.publicBaseUrl}?ward=${activeWardId}`;
   const msg = `🎄 *${w.full} — Christmas Carol App*\n⛪ ${CFG.churchName}\n\n📲 Open App: ${link}\n🔑 Ward Access Code: *${code}*\n\n(Enter once on your phone & tap Add to Home Screen for live ETAs, Navigation & Songbook!)`;
-  copyText(msg, "WhatsApp Invite copied!");
+  copyText(msg, `Copied! Select "${groupName}" in WhatsApp`);
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
 async function rotateWardAdminCode() {
