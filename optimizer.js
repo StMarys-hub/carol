@@ -200,16 +200,18 @@ window.CarolOptimizer = (function () {
    * Supports optional Carol Day column & Stop Role (START / END)
    */
   function detectDelimiter(lines) {
-    const sample = lines.slice(0, 5).join("\n");
+    const sampleLines = lines.slice(0, Math.min(8, lines.length));
+    const sample = sampleLines.join("\n");
     const counts = {
       "|": (sample.match(/\|/g) || []).length,
       "\t": (sample.match(/\t/g) || []).length,
       ";": (sample.match(/;/g) || []).length,
       ",": (sample.match(/,/g) || []).length
     };
-    if (counts["|"] >= lines.length) return "|";
-    if (counts["\t"] >= lines.length) return "\t";
-    if (counts[";"] >= lines.length) return ";";
+    const minNeeded = Math.max(1, Math.floor(sampleLines.length * 0.6));
+    if (counts["|"] >= minNeeded) return "|";
+    if (counts["\t"] >= minNeeded) return "\t";
+    if (counts[";"] >= minNeeded) return ";";
     return ",";
   }
 

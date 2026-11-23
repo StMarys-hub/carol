@@ -14,7 +14,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=1" />
+  <link rel="stylesheet" href="./styles.css?v=2" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -90,10 +90,6 @@
       <h2>Enter Ward Access Code</h2>
       <p id="lock-subtitle">Family names, addresses, and live carol ETAs are protected for St. Mary's parishioners.</p>
 
-      <div id="supabase-missing-notice" class="notes-line" style="display: none; text-align: left; border-left-color: var(--accent-gold);">
-        <strong>Supabase Backend Not Connected Yet:</strong> Tap <strong>⚙️ Settings → Connect Supabase</strong> to enter your Project URL &amp; Anon Key (or configure <code>supabase-config.js</code>).
-      </div>
-
       <form onsubmit="handleUnlockSubmit(event)">
         <input
           type="password"
@@ -110,7 +106,6 @@
 
       <div class="lock-footer-links">
         <button class="footer-chip" onclick="openSongbookModal()">🎵 Open Songbook</button>
-        <button class="footer-chip" onclick="openSettingsModal()">⚙️ Connect Supabase</button>
       </div>
     </section>
 
@@ -145,7 +140,7 @@
         <button class="action-pill shift-now" onclick="shiftScheduleToNow()">⏱️ Shift to Now</button>
         <button class="action-pill share-eta" onclick="shareWhatsAppStatus()">💬 WhatsApp ETA</button>
         <button class="action-pill add-house" onclick="openAddHouseModal()">➕ Add House</button>
-        <button id="btn-gps" class="action-pill" onclick="toggleGpsTracking()">📍 Near Me</button>
+        <button class="action-pill" onclick="openBroadcastModal()">📢 Broadcast</button>
       </div>
 
       <!-- Quick Search -->
@@ -171,6 +166,7 @@
         <div class="ward-footer-links">
           <a id="footer-call-btn" class="footer-chip" href="#" style="display: none;">📞 Call Coordinator</a>
           <a id="footer-sms-btn" class="footer-chip" href="#" style="display: none;">💬 Text Coordinator</a>
+          <button id="btn-gps" class="footer-chip" onclick="toggleGpsTracking()">📍 Near Me</button>
           <button class="footer-chip" onclick="openAdminModal()">🔐 Ward Admin</button>
           <button class="footer-chip" onclick="openSongbookModal()">🎵 Songbook</button>
           <button class="footer-chip" onclick="lockCurrentWard()">🔒 Lock Ward</button>
@@ -184,7 +180,7 @@
     <div class="modal-sheet" role="dialog" aria-modal="true" aria-label="Carol Songbook">
       <div class="modal-header">
         <h2>🎵 Carol Songbook</h2>
-        <button class="close-btn" onclick="closeSongbookModal()">✕</button>
+        <button class="close-btn" onclick="closeSongbookModal()">✕ Close</button>
       </div>
 
       <div class="song-toolbar">
@@ -245,7 +241,7 @@
     <div class="modal-sheet" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2>➕ Add Unplanned House</h2>
-        <button class="close-btn" onclick="closeModal('add-house-modal')">✕</button>
+        <button class="close-btn" onclick="closeModal('add-house-modal')">✕ Close</button>
       </div>
       <div class="form-group">
         <label for="add-family">Family Name *</label>
@@ -287,156 +283,252 @@
     </div>
   </div>
 
-  <!-- Ward Admin Portal Modal (Protected by verify_ward_admin_code RPC) -->
+  <!-- Ward Admin Portal Modal (Simple 3-Tab Layout — Zero Training Needed) -->
   <div id="admin-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'admin-modal')">
     <div class="modal-sheet" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2 id="admin-modal-title">🔐 Ward Admin Portal</h2>
-        <button class="close-btn" onclick="closeModal('admin-modal')">✕</button>
+        <h2 id="admin-modal-title">🔐 Ward Admin</h2>
+        <button class="close-btn" onclick="closeModal('admin-modal')">✕ Close</button>
       </div>
 
       <!-- Admin Login Gate -->
       <div id="admin-login-gate">
-        <p class="helper-text" style="margin-bottom: 12px; font-size: 0.86rem;">
-          Enter the independent Admin Code for <strong id="admin-gate-ward-name">Ward 4</strong> (or Master Code). Writes are strictly scoped to this ward in Supabase.
+        <p class="helper-text" style="margin-bottom: 12px; font-size: 0.88rem;">
+          Enter the Admin Code for <strong id="admin-gate-ward-name">Ward 4</strong> to manage houses, days, years, or broadcast messages.
         </p>
         <div class="form-group">
           <label for="admin-code-input">Ward Admin Code</label>
-          <input type="password" id="admin-code-input" placeholder="Enter Admin Code" />
+          <input type="password" id="admin-code-input" placeholder="Enter Admin Code" onkeydown="if(event.key==='Enter') handleAdminVerify()" />
         </div>
         <div id="admin-login-error" class="lock-error"></div>
         <div class="modal-footer">
-          <button class="btn-full btn-gold" onclick="handleAdminVerify()">Unlock Ward Admin</button>
+          <button class="btn-full btn-secondary" onclick="closeModal('admin-modal')">Cancel</button>
+          <button class="btn-full btn-gold" onclick="handleAdminVerify()">🔓 Unlock Admin</button>
         </div>
       </div>
 
-      <!-- Unlocked 4-Tab Admin Portal -->
+      <!-- Unlocked Simple 3-Tab Admin Portal -->
       <div id="admin-portal-body" style="display: none;">
         <div class="admin-tabs">
-          <button class="admin-tab active" onclick="switchAdminTab('importer', this)">📥 Bulk Importer</button>
-          <button class="admin-tab" onclick="switchAdminTab('optimizer', this)">🧭 2-Opt Optimizer</button>
-          <button class="admin-tab" onclick="switchAdminTab('seasons', this)">📅 Seasons &amp; Settings</button>
-          <button class="admin-tab" onclick="switchAdminTab('security', this)">🔑 Security &amp; Invite</button>
+          <button class="admin-tab active" onclick="switchAdminTab('houses', this)">🏠 Houses &amp; Route</button>
+          <button class="admin-tab" onclick="switchAdminTab('seasons', this)">📅 Years &amp; Days</button>
+          <button class="admin-tab" onclick="switchAdminTab('security', this)">🔑 Code &amp; Broadcast</button>
         </div>
 
-        <!-- Tab 1: Multi-Day Bulk Delimited Importer -->
-        <div id="admin-pane-importer" class="admin-pane active">
-          <div class="form-row">
+        <!-- TAB 1: Houses, Auto-Sort Route & Simple Paste Importer -->
+        <div id="admin-pane-houses" class="admin-pane active">
+          <div class="admin-card">
+            <div class="admin-card-title">
+              <span>🏠 Manage Houses</span>
+              <div style="display: flex; gap: 6px;">
+                <button class="mini-btn gold" onclick="runConstrainedOptimizer()">⚡ Auto-Sort Best Route</button>
+                <button class="mini-btn mint" onclick="saveOptimizedOrder()">💾 Save Order</button>
+              </div>
+            </div>
+            <div class="form-group" style="margin-bottom: 10px;">
+              <select id="opt-day-select" onchange="renderOptimizerList()" aria-label="Select Carol Day"></select>
+            </div>
+            <div id="opt-list"></div>
+          </div>
+
+          <div class="admin-card">
+            <div class="admin-card-title">
+              <span>📥 Paste / Bulk Import Houses</span>
+              <button class="mini-btn" onclick="openFormatHelpModal()">? Sample Format</button>
+            </div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="imp-default-day">Default Day (if not in text)</label>
+                <select id="imp-default-day"></select>
+              </div>
+              <div class="form-group" style="display: flex; align-items: flex-end;">
+                <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 0.82rem;">
+                  <input type="checkbox" id="imp-replace-day" style="width: auto;" />
+                  Replace existing houses in those day(s)
+                </label>
+              </div>
+            </div>
             <div class="form-group">
-              <label for="imp-default-day">Default Carol Day (for rows without day column)</label>
-              <select id="imp-default-day"></select>
+              <textarea id="imp-textarea" placeholder="Paste list from Excel, Sheets, or WhatsApp:&#10;Family Name | Full Address | Day 1 | End"></textarea>
             </div>
-            <div class="form-group" style="display: flex; align-items: flex-end; gap: 6px;">
-              <button class="btn-full btn-secondary" onclick="promptAddNewDay()">+ Add New Day</button>
-              <button class="btn-full btn-secondary" onclick="openFormatHelpModal()" style="flex: 0 0 auto; min-width: 48px;" title="Format Help">?</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn-full btn-secondary" onclick="previewBulkImport()">1. Preview List</button>
+              <button id="btn-geocode-save-import" class="btn-full btn-save" onclick="geocodeAndSaveImport()" disabled>2. Save Houses</button>
             </div>
+            <div id="imp-status" class="helper-text" style="color: var(--accent-sky);"></div>
+            <div id="imp-preview-wrap" class="preview-table-wrap" style="display: none;"></div>
           </div>
-
-          <div class="form-group">
-            <label for="imp-textarea">Paste Delimited Text (Auto-detects Comma, Pipe, Tab, Semicolon)</label>
-            <textarea id="imp-textarea" placeholder="Family Name | Full Address | Carol Day | Stop Role | Phone / Notes"></textarea>
-          </div>
-
-          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 10px;">
-            <button class="btn-full btn-secondary" onclick="previewBulkImport()">1. Parse &amp; Preview Table</button>
-            <button id="btn-geocode-save-import" class="btn-full btn-save" onclick="geocodeAndSaveImport()" disabled>2. Geocode &amp; Save to Supabase</button>
-          </div>
-          <label style="display: flex; align-items: center; gap: 8px; font-size: 0.8rem;">
-            <input type="checkbox" id="imp-replace-day" style="width: auto;" />
-            Replace existing houses in imported day(s) instead of appending
-          </label>
-          <div id="imp-status" class="helper-text" style="color: var(--accent-sky);"></div>
-          <div id="imp-preview-wrap" class="preview-table-wrap" style="display: none;"></div>
         </div>
 
-        <!-- Tab 2: Per-Day Constrained 2-Opt Route Optimizer -->
-        <div id="admin-pane-optimizer" class="admin-pane">
-          <div class="form-group">
-            <label for="opt-day-select">Select Carol Day to Optimize</label>
-            <select id="opt-day-select" onchange="renderOptimizerList()"></select>
-          </div>
-          <p class="helper-text" style="margin-bottom: 10px;">
-            Runs Nearest-Neighbor + 2-Opt Local Search while strictly pinning <strong>START</strong> to #1 and <strong>END</strong> (Dinner Host) to the last stop.
-          </p>
-          <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-            <button class="btn-full btn-gold" onclick="runConstrainedOptimizer()">⚡ Auto-Optimize (2-Opt)</button>
-            <button class="btn-full btn-save" onclick="saveOptimizedOrder()">💾 Save Sequence</button>
-          </div>
-          <div id="opt-list"></div>
-        </div>
-
-        <!-- Tab 3: Multi-Year Seasons & Ward Settings -->
+        <!-- TAB 2: Years (Edit/Delete/Clone) & Carol Days (Edit/Delete/Add) & Ward Info -->
         <div id="admin-pane-seasons" class="admin-pane">
-          <div class="form-row">
-            <div class="form-group">
-              <label for="adm-new-year">Create / Activate Season Year</label>
-              <input type="number" id="adm-new-year" value="2027" min="2024" max="2040" />
+          <div class="admin-card">
+            <div class="admin-card-title">
+              <span>📆 Season Years</span>
+              <div style="display: flex; gap: 6px; align-items: center;">
+                <input type="number" id="adm-new-year" value="2027" min="2024" max="2040" style="width: 84px; padding: 5px 8px; font-size: 0.84rem;" />
+                <button class="mini-btn mint" onclick="createNewSeason()">+ Add Year</button>
+              </div>
             </div>
-            <div class="form-group" style="display: flex; align-items: flex-end; gap: 6px;">
-              <button class="btn-full btn-secondary" onclick="createNewSeason()">+ Create Year</button>
-              <button class="btn-full btn-gold" onclick="clonePreviousYear()">📋 Clone Active Year</button>
-            </div>
+            <div id="admin-seasons-list"></div>
           </div>
 
-          <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 12px 0;" />
+          <div class="admin-card">
+            <div class="admin-card-title">
+              <span>📅 Carol Days (Active Year)</span>
+              <button class="mini-btn mint" onclick="promptAddNewDay()">+ Add Day</button>
+            </div>
+            <div id="admin-days-list"></div>
+          </div>
 
-          <div class="form-row">
-            <div class="form-group">
-              <label for="adm-visit-mins">Default Visit Mins / House</label>
-              <input type="number" id="adm-visit-mins" min="5" max="120" value="20" />
+          <div class="admin-card">
+            <div class="admin-card-title"><span>⚙️ Ward Defaults</span></div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="adm-visit-mins">Mins / House</label>
+                <input type="number" id="adm-visit-mins" min="5" max="120" value="20" />
+              </div>
+              <div class="form-group">
+                <label for="adm-coord-phone">Coordinator Phone</label>
+                <input type="tel" id="adm-coord-phone" placeholder="704-555-0123" />
+              </div>
             </div>
-            <div class="form-group">
-              <label for="adm-drive-buffer">Drive / Parking Buffer (Mins)</label>
-              <input type="number" id="adm-drive-buffer" min="0" max="60" value="5" />
+            <div class="form-row">
+              <div class="form-group">
+                <label for="adm-coord-name">Coordinator Name</label>
+                <input type="text" id="adm-coord-name" placeholder="Ward Coordinator" />
+              </div>
+              <div class="form-group">
+                <label for="adm-banner">Pinned Banner Message</label>
+                <input type="text" id="adm-banner" placeholder="Optional announcement banner" />
+              </div>
             </div>
-          </div>
-          <div class="form-row">
-            <div class="form-group">
-              <label for="adm-coord-name">Coordinator Name</label>
-              <input type="text" id="adm-coord-name" placeholder="Ward Coordinator" />
-            </div>
-            <div class="form-group">
-              <label for="adm-coord-phone">Coordinator Phone</label>
-              <input type="tel" id="adm-coord-phone" placeholder="704-555-0123" />
-            </div>
-          </div>
-          <div class="form-group">
-            <label for="adm-meeting-point">Meeting Point Address</label>
-            <input type="text" id="adm-meeting-point" placeholder="e.g., St. Mary's Church Parking Lot" />
-          </div>
-          <div class="form-group">
-            <label for="adm-banner">Pinned Ward Instructions Banner (Optional)</label>
-            <input type="text" id="adm-banner" placeholder="e.g., Wear Santa hats &amp; carpool from Stop #1!" />
-          </div>
-          <div class="modal-footer">
-            <button class="btn-full btn-save" onclick="saveAdminWardSettings()">Save Ward Settings</button>
+            <button class="btn-full btn-save" onclick="saveAdminWardSettings()">💾 Save Ward Info</button>
           </div>
         </div>
 
-        <!-- Tab 4: Security (Reset Ward User Code + WhatsApp Invite + Rotate Admin Code) -->
+        <!-- TAB 3: Ward Code, WhatsApp Invite & Broadcast -->
         <div id="admin-pane-security" class="admin-pane">
-          <div class="form-group">
-            <label for="sec-new-user-code">Reset Parishioner Ward Access Code</label>
-            <div style="display: flex; gap: 8px;">
-              <input type="text" id="sec-new-user-code" placeholder="e.g., 4829" style="flex: 1;" />
-              <button class="btn-full btn-secondary" onclick="generateRandomPin()" style="flex: 0 0 auto; min-width: 110px;">🎲 Random PIN</button>
+          <div class="admin-card">
+            <div class="admin-card-title"><span>📢 Live Message Broadcast</span></div>
+            <p class="helper-text" style="margin-bottom: 10px;">Send an instant popup announcement to all connected carolers in this ward.</p>
+            <button class="btn-full btn-gold" onclick="closeModal('admin-modal'); openBroadcastModal();">📢 Open Broadcast Popup</button>
+          </div>
+
+          <div class="admin-card">
+            <div class="admin-card-title"><span>🔑 Ward Access Code (For Families)</span></div>
+            <div class="form-group">
+              <div style="display: flex; gap: 8px;">
+                <input type="text" id="sec-new-user-code" placeholder="New 4-digit code (e.g., 4829)" style="flex: 1;" />
+                <button class="btn-full btn-secondary" onclick="generateRandomPin()" style="flex: 0 0 auto; min-width: 110px;">🎲 Random</button>
+              </div>
             </div>
-            <p class="helper-text">Resetting immediately revokes old cached sessions on all phones next time they come online.</p>
-          </div>
-          <div style="display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 16px;">
-            <button class="btn-full btn-gold" onclick="resetWardUserCode()">🔄 Reset User Code</button>
-            <button class="btn-full btn-save" onclick="copyWhatsAppWardInvite()">📲 Copy WhatsApp Invite</button>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn-full btn-gold" onclick="resetWardUserCode()">🔄 Save New Code</button>
+              <button class="btn-full btn-save" onclick="copyWhatsAppWardInvite()">📲 Copy WhatsApp Invite</button>
+            </div>
           </div>
 
-          <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 14px 0;" />
-
-          <div class="form-group">
-            <label for="sec-new-admin-code">Rotate Ward Admin Code (Min 6 chars)</label>
-            <input type="password" id="sec-new-admin-code" placeholder="New strong ward admin code" />
+          <div class="admin-card">
+            <div class="admin-card-title"><span>🔐 Change Ward Admin Code</span></div>
+            <div class="form-group">
+              <input type="password" id="sec-new-admin-code" placeholder="New admin code (min 6 chars)" />
+            </div>
+            <button class="btn-full btn-danger" onclick="rotateWardAdminCode()">Change Admin Code</button>
           </div>
-          <button class="btn-full btn-danger" onclick="rotateWardAdminCode()">🔐 Rotate Admin Code</button>
         </div>
       </div>
+    </div>
+  </div>
+
+  <!-- Simple Edit Single House Modal -->
+  <div id="edit-house-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'edit-house-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>✏️ Edit House</h2>
+        <button class="close-btn" onclick="closeModal('edit-house-modal')">✕ Close</button>
+      </div>
+      <input type="hidden" id="edit-house-id" />
+      <div class="form-group">
+        <label for="edit-house-family">Family Name</label>
+        <input type="text" id="edit-house-family" />
+      </div>
+      <div class="form-group">
+        <label for="edit-house-address">Address</label>
+        <input type="text" id="edit-house-address" />
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit-house-role">Stop Role</label>
+          <select id="edit-house-role">
+            <option value="">Normal Stop</option>
+            <option value="START">START (First House)</option>
+            <option value="END">END (Final / Dinner Host)</option>
+          </select>
+        </div>
+        <div class="form-group">
+          <label for="edit-house-mins">Mins at House</label>
+          <input type="number" id="edit-house-mins" min="5" max="120" value="20" />
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group">
+          <label for="edit-house-phone">Host Phone</label>
+          <input type="tel" id="edit-house-phone" />
+        </div>
+        <div class="form-group">
+          <label for="edit-house-notes">Notes / Gate Code</label>
+          <input type="text" id="edit-house-notes" />
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-full btn-secondary" onclick="closeModal('edit-house-modal')">Cancel</button>
+        <button class="btn-full btn-save" onclick="saveEditedHouse()">💾 Save Changes</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Broadcast Message Composer Modal -->
+  <div id="broadcast-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'broadcast-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>📢 Broadcast Message to Ward</h2>
+        <button class="close-btn" onclick="closeModal('broadcast-modal')">✕ Close</button>
+      </div>
+      <p class="helper-text" style="margin-bottom: 10px; font-size: 0.84rem;">
+        Pops up immediately on every connected caroler's phone in this ward (and optionally pins to the top banner).
+      </p>
+      <div class="preset-chips">
+        <button class="mini-btn" onclick="setBroadcastPreset('🚗 Moving to the next house now! Please head to your cars.')">🚗 Moving Now</button>
+        <button class="mini-btn" onclick="setBroadcastPreset('⏳ Running 10 mins behind schedule — thanks for your patience!')">⏳ +10m Delay</button>
+        <button class="mini-btn" onclick="setBroadcastPreset('🅿️ Park once here — next 2 houses are walkable!')">🅿️ Walkable Stop</button>
+        <button class="mini-btn" onclick="setBroadcastPreset('🍽️ Final stop reached! Dinner is served — welcome everyone!')">🍽️ Dinner Ready</button>
+      </div>
+      <div class="form-group">
+        <label for="broadcast-text-input">Announcement Message</label>
+        <textarea id="broadcast-text-input" style="min-height: 90px; font-family: inherit;" placeholder="Type a live message for all carolers..."></textarea>
+      </div>
+      <label style="display: flex; align-items: center; gap: 8px; font-size: 0.82rem; margin-bottom: 8px;">
+        <input type="checkbox" id="broadcast-pin-banner" checked style="width: auto;" />
+        Also pin to top announcement banner
+      </label>
+      <div class="modal-footer">
+        <button class="btn-full btn-secondary" onclick="closeModal('broadcast-modal')">Cancel</button>
+        <button class="btn-full btn-gold" onclick="sendBroadcastMessage()">📢 Send Broadcast Now</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Incoming Live Broadcast Popup (Shown on All Connected Carolers' Phones) -->
+  <div id="live-broadcast-popup" class="modal-backdrop" onclick="closeOnBackdrop(event, 'live-broadcast-popup')">
+    <div class="modal-sheet broadcast-sheet" role="dialog" aria-modal="true">
+      <div class="modal-header">
+        <h2>📢 Ward Announcement</h2>
+        <button class="close-btn" onclick="closeModal('live-broadcast-popup')">✕ Close</button>
+      </div>
+      <div id="live-broadcast-text" class="broadcast-body-text"></div>
+      <div id="live-broadcast-time" class="helper-text" style="margin-bottom: 12px;"></div>
+      <button class="btn-full btn-gold" style="width: 100%;" onclick="closeModal('live-broadcast-popup')">✓ Got It</button>
     </div>
   </div>
 
@@ -445,7 +537,7 @@
     <div class="modal-sheet" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2>❓ Bulk Importer Format Guide</h2>
-        <button class="close-btn" onclick="closeModal('format-help-modal')">✕</button>
+        <button class="close-btn" onclick="closeModal('format-help-modal')">✕ Close</button>
       </div>
       <p class="helper-text" style="font-size: 0.86rem; margin-bottom: 10px;">
         Paste directly from Excel, Google Sheets, or WhatsApp. Delimiters <code>|</code>, <code>,</code>, <code>Tab</code>, and <code>;</code> are auto-detected.
@@ -456,17 +548,18 @@ Sajan &amp; Macklina | 5678 Ballantyne Commons Pkwy, Charlotte, NC 28277 | Day 1
 Mathew &amp; Anitha | 9101 Providence Rd, Charlotte, NC 28277 | Day 1 | END | Dinner Host
 Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
       <div class="modal-footer">
-        <button class="btn-full btn-save" onclick="copySampleImportFormat()">📋 Copy Sample &amp; Paste into Importer</button>
+        <button class="btn-full btn-secondary" onclick="closeModal('format-help-modal')">Close</button>
+        <button class="btn-full btn-save" onclick="copySampleImportFormat()">📋 Paste Sample</button>
       </div>
     </div>
   </div>
 
-  <!-- User Settings & Supabase Connection Modal -->
+  <!-- Clean User Settings Modal (Zero Backend Credentials Exposed) -->
   <div id="settings-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'settings-modal')">
     <div class="modal-sheet" role="dialog" aria-modal="true">
       <div class="modal-header">
         <h2>⚙️ App Settings</h2>
-        <button class="close-btn" onclick="closeModal('settings-modal')">✕</button>
+        <button class="close-btn" onclick="closeModal('settings-modal')">✕ Close</button>
       </div>
 
       <div class="form-row">
@@ -487,18 +580,6 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
         </div>
       </div>
 
-      <hr style="border: none; border-top: 1px solid var(--border-subtle); margin: 12px 0;" />
-
-      <div class="form-group">
-        <label for="cfg-sb-url">Supabase Project URL</label>
-        <input type="url" id="cfg-sb-url" placeholder="https://your-project.supabase.co" />
-      </div>
-      <div class="form-group">
-        <label for="cfg-sb-key">Supabase Public Anon Key</label>
-        <input type="text" id="cfg-sb-key" placeholder="eyJhbGciOi..." />
-        <p class="helper-text">Only the public anon key is stored; all PII tables are locked behind server-side RPCs.</p>
-      </div>
-
       <div class="modal-footer">
         <button class="btn-full btn-danger" onclick="lockCurrentWard()">🔒 Lock Ward</button>
         <button class="btn-full btn-save" onclick="saveUserSettings()">Save Settings</button>
@@ -508,9 +589,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=1" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=1" charset="UTF-8"></script>
-  <script src="./songbook.js?v=1" charset="UTF-8"></script>
-  <script src="./app.js?v=1" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=2" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=2" charset="UTF-8"></script>
+  <script src="./songbook.js?v=2" charset="UTF-8"></script>
+  <script src="./app.js?v=2" charset="UTF-8"></script>
 </body>
 </html>

@@ -121,10 +121,7 @@ function switchWard(newWardId) {
 async function bootActiveWard() {
   applyUiPrefs();
   updateWardHeaderLabels();
-
-  const hasSb = initSupabaseClient();
-  const missingNotice = document.getElementById("supabase-missing-notice");
-  if (missingNotice) missingNotice.style.display = hasSb ? "none" : "block";
+  initSupabaseClient();
 
   const cachedCode = localStorage.getItem(keyUserCode(activeWardId));
   const cachedRouteRaw = localStorage.getItem(keyOfflineRoute(activeWardId));
@@ -301,6 +298,15 @@ function subscribeRealtime() {
       const p = payload && payload.payload;
       if (!p || p.ward_id !== activeWardId) return;
       syncActiveWardOnline(true);
+    })
+    .on("broadcast", { event: "broadcast_alert" }, (payload) => {
+      const p = payload && payload.payload;
+      if (!p || p.ward_id !== activeWardId || !p.message) return;
+      showLiveBroadcastPopup(p.message, p.sent_at);
+      if (p.pinned && wardPayload && wardPayload.ward_settings) {
+        wardPayload.ward_settings.instructions_banner = p.message;
+        render();
+      }
     })
     .subscribe();
 }
@@ -1252,7 +1258,8 @@ function switchAdminTab(tabName, btnEl) {
   if (btnEl) btnEl.classList.add("active");
   const pane = document.getElementById(`admin-pane-${tabName}`);
   if (pane) pane.classList.add("active");
-  if (tabName === "optimizer") renderOptimizerList();
+  if (tabName === "houses") renderOptimizerList();
+  if (tabName === "seasons") renderAdminSeasonsAndDays();
 }
 
 function populateAdminControls() {
@@ -1261,15 +1268,182 @@ function populateAdminControls() {
     ? days.map((d) => `<option value="${escapeHtml(d.label)}" data-id="${d.id}">${escapeHtml(d.label)}</option>`).join("")
     : `<option value="Day 1">Day 1</option>`;
   document.getElementById("imp-default-day").innerHTML = dayOpts;
-  document.getElementById("opt-day-select").innerHTML = days.map((d) => `<option value="${d.id}">${escapeHtml(d.label)}</option>`).join("");
+  document.getElementById("opt-day-select").innerHTML = days.length
+    ? days.map((d) => `<option value="${d.id}" ${d.id === activeDayId ? "selected" : ""}>${escapeHtml(d.label)}</option>`).join("")
+    : `<option value="">No days yet — add a day in Years &amp; Days</option>`;
 
   const s = (wardPayload && wardPayload.ward_settings) || {};
   document.getElementById("adm-visit-mins").value = s.default_visit_mins || 20;
-  document.getElementById("adm-drive-buffer").value = s.drive_buffer_mins || 5;
   document.getElementById("adm-coord-name").value = s.coordinator_name || "";
   document.getElementById("adm-coord-phone").value = s.coordinator_phone || "";
-  document.getElementById("adm-meeting-point").value = s.meeting_point || "";
   document.getElementById("adm-banner").value = s.instructions_banner || "";
+
+  renderOptimizerList();
+  renderAdminSeasonsAndDays();
+}
+
+function renderAdminSeasonsAndDays() {
+  const seasonsEl = document.getElementById("admin-seasons-list");
+  const daysEl = document.getElementById("admin-days-list");
+  const seasons = (wardPayload && wardPayload.seasons) || [];
+  const days = getDays();
+
+  if (seasonsEl) {
+    seasonsEl.innerHTML = seasons.length
+      ? seasons
+          .map(
+            (s) => `
+        <div class="admin-item-row">
+          <div class="admin-item-main">
+            <div class="admin-item-name">${s.year} — ${escapeHtml(s.name)} ${s.is_active ? `<span class="role-badge start">ACTIVE</span>` : ""}</div>
+          </div>
+          <div class="admin-item-btns">
+            ${!s.is_active ? `<button class="mini-btn mint" onclick="activateSeason(${s.year}, '${escapeJs(s.name)}')">✓ Activate</button>` : ""}
+            <button class="mini-btn" onclick="renameSeason(${s.year}, '${escapeJs(s.name)}')">✏️ Edit</button>
+            <button class="mini-btn gold" onclick="cloneYearToNext(${s.year})">📋 Copy → ${s.year + 1}</button>
+            ${seasons.length > 1 ? `<button class="mini-btn danger" onclick="deleteSeason('${s.id}', ${s.year})">🗑️</button>` : ""}
+          </div>
+        </div>
+      `
+          )
+          .join("")
+      : `<p class="helper-text">No season years yet. Add a year above.</p>`;
+  }
+
+  if (daysEl) {
+    daysEl.innerHTML = days.length
+      ? days
+          .map(
+            (d) => `
+        <div class="admin-item-row">
+          <div class="admin-item-main">
+            <div class="admin-item-name">${escapeHtml(d.label)}</div>
+            <div class="admin-item-sub">${d.carol_date || "No date"} • Start ${minutesToTimeStr(timeStrToMinutes(d.start_time))} • ${d.avg_visit_mins || 20}m/house</div>
+          </div>
+          <div class="admin-item-btns">
+            <button class="mini-btn" onclick="editCarolDay('${d.id}')">✏️ Edit</button>
+            <button class="mini-btn danger" onclick="deleteCarolDay('${d.id}', '${escapeJs(d.label)}')">🗑️</button>
+          </div>
+        </div>
+      `
+          )
+          .join("")
+      : `<p class="helper-text">No carol days yet. Tap + Add Day above.</p>`;
+  }
+}
+
+async function activateSeason(year, name) {
+  const { data } = await sbClient.rpc("admin_upsert_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_year: year,
+    p_name: name,
+    p_activate: true
+  });
+  if (data && data.ok) {
+    activeDayId = null;
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Switched active season to ${year}`);
+  }
+}
+
+async function renameSeason(year, currentName) {
+  const nextName = window.prompt(`Rename ${year} season:`, currentName);
+  if (!nextName || !nextName.trim()) return;
+  const { data } = await sbClient.rpc("admin_upsert_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_year: year,
+    p_name: nextName.trim(),
+    p_activate: false
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast("Season updated!");
+  }
+}
+
+async function deleteSeason(seasonId, year) {
+  if (!window.confirm(`Delete season ${year} and all its days & houses? This cannot be undone.`)) return;
+  const { data } = await sbClient.rpc("admin_delete_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_season_id: seasonId
+  });
+  if (data && data.ok) {
+    activeDayId = null;
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Deleted season ${year}`);
+  } else {
+    showToast(`Delete failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+  }
+}
+
+async function cloneYearToNext(fromYr) {
+  const toYr = fromYr + 1;
+  if (!window.confirm(`Copy all houses & days from ${fromYr} into ${toYr} and activate ${toYr}?`)) return;
+  const { data } = await sbClient.rpc("admin_clone_previous_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_from_year: fromYr,
+    p_to_year: toYr
+  });
+  if (data && data.ok) {
+    activeDayId = null;
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Copied ${data.copied_houses} families into ${toYr}!`);
+  } else {
+    showToast(`Copy failed: ${data ? data.error : "Error"}`);
+  }
+}
+
+async function editCarolDay(dayId) {
+  const d = getDays().find((x) => x.id === dayId);
+  if (!d) return;
+  const label = window.prompt("Day Label:", d.label);
+  if (!label) return;
+  const carolDate = window.prompt("Carol Date (YYYY-MM-DD, optional):", d.carol_date || "") || null;
+  const startTime = window.prompt("Start Time (HH:MM 24h, e.g. 14:00):", d.start_time || "14:00") || "14:00";
+  const avgMins = parseInt(window.prompt("Minutes per House:", String(d.avg_visit_mins || 20)), 10) || 20;
+
+  const { data } = await sbClient.rpc("admin_upsert_carol_day", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_season_id: d.season_id,
+    p_day_id: d.id,
+    p_day_number: d.day_number,
+    p_label: label.trim(),
+    p_carol_date: carolDate,
+    p_start_time: startTime.trim(),
+    p_avg_visit_mins: avgMins,
+    p_drive_buffer_mins: d.drive_buffer_mins || 5
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Updated ${label}`);
+  }
+}
+
+async function deleteCarolDay(dayId, label) {
+  if (!window.confirm(`Delete "${label}" and all its houses?`)) return;
+  const { data } = await sbClient.rpc("admin_delete_carol_day", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_day_id: dayId
+  });
+  if (data && data.ok) {
+    activeDayId = null;
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Deleted ${label}`);
+  } else {
+    showToast(`Delete failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+  }
 }
 
 async function promptAddNewDay() {
@@ -1321,7 +1495,7 @@ function previewBulkImport() {
   wrap.style.display = "block";
   wrap.innerHTML = `
     <table class="preview-table">
-      <thead><tr><th>Day</th><th>Family</th><th>Address</th><th>Role</th><th>Notes</th></tr></thead>
+      <thead><tr><th>Day</th><th>Family</th><th>Address</th><th>Role</th><th>Notes</th><th></th></tr></thead>
       <tbody>
         ${parsedImportRows
           .map(
@@ -1338,6 +1512,7 @@ function previewBulkImport() {
               </select>
             </td>
             <td><input value="${escapeHtml(r.notes)}" onchange="parsedImportRows[${i}].notes=this.value" style="min-width:110px;" /></td>
+            <td><button class="mini-btn danger" onclick="removeImportPreviewRow(${i})" title="Remove row">✕</button></td>
           </tr>
         `
           )
@@ -1345,6 +1520,19 @@ function previewBulkImport() {
       </tbody>
     </table>
   `;
+}
+
+function removeImportPreviewRow(idx) {
+  parsedImportRows.splice(idx, 1);
+  if (!parsedImportRows.length) {
+    document.getElementById("imp-preview-wrap").style.display = "none";
+    document.getElementById("btn-geocode-save-import").disabled = true;
+    document.getElementById("imp-status").textContent = "All rows removed.";
+    return;
+  }
+  const wrap = document.getElementById("imp-preview-wrap");
+  document.getElementById("imp-status").textContent = `${parsedImportRows.length} families ready to save.`;
+  wrap.querySelectorAll("tbody tr")[idx]?.remove();
 }
 
 async function geocodeAndSaveImport() {
@@ -1419,25 +1607,94 @@ function renderOptimizerList() {
 function drawOptimizerDraft() {
   const el = document.getElementById("opt-list");
   if (!optimizerDraft.length) {
-    el.innerHTML = `<p class="helper-text">No houses in this day yet.</p>`;
+    el.innerHTML = `<p class="helper-text">No houses in this day yet. Paste a list below to import!</p>`;
     return;
   }
   el.innerHTML = optimizerDraft
     .map(
       (h, i) => `
-      <div class="stop-card visited-collapsed" style="opacity:1; margin-bottom:6px;">
-        <div class="collapsed-info">
-          <span class="seq-badge">#${i + 1}</span>
-          <span class="collapsed-title" style="color:var(--text-primary);">${escapeHtml(h.family_name)} ${h.stop_role ? `[${h.stop_role}]` : ""}</span>
+      <div class="admin-item-row">
+        <div class="admin-item-main">
+          <div class="admin-item-name">#${i + 1} ${escapeHtml(h.family_name)} ${h.stop_role ? `<span class="role-badge ${h.stop_role === "START" ? "start" : "end"}">${h.stop_role}</span>` : ""}</div>
+          <div class="admin-item-sub">${escapeHtml(h.address)}</div>
         </div>
-        <div class="reorder-controls">
-          <button class="move-btn" onclick="moveOptDraft(${i}, -1)" ${i === 0 ? "disabled" : ""}>▲</button>
-          <button class="move-btn" onclick="moveOptDraft(${i}, 1)" ${i === optimizerDraft.length - 1 ? "disabled" : ""}>▼</button>
+        <div class="admin-item-btns">
+          <button class="mini-btn" onclick="openEditHouseModal('${h.id}')" title="Edit">✏️</button>
+          <button class="mini-btn" onclick="moveOptDraft(${i}, -1)" ${i === 0 ? "disabled" : ""} title="Move Up">▲</button>
+          <button class="mini-btn" onclick="moveOptDraft(${i}, 1)" ${i === optimizerDraft.length - 1 ? "disabled" : ""} title="Move Down">▼</button>
+          <button class="mini-btn danger" onclick="deleteSingleHouse('${h.id}', '${escapeJs(h.family_name)}')" title="Delete">🗑️</button>
         </div>
       </div>
     `
     )
     .join("");
+}
+
+function openEditHouseModal(houseId) {
+  const h = (wardPayload && wardPayload.ward_houses || []).find((x) => x.id === houseId);
+  if (!h) return;
+  document.getElementById("edit-house-id").value = h.id;
+  document.getElementById("edit-house-family").value = h.family_name || "";
+  document.getElementById("edit-house-address").value = h.address || "";
+  document.getElementById("edit-house-role").value = h.stop_role || "";
+  document.getElementById("edit-house-mins").value = h.visit_mins || 20;
+  document.getElementById("edit-house-phone").value = h.phone || "";
+  document.getElementById("edit-house-notes").value = h.notes || "";
+  document.getElementById("edit-house-modal").classList.add("open");
+}
+
+async function saveEditedHouse() {
+  const id = document.getElementById("edit-house-id").value;
+  const family_name = document.getElementById("edit-house-family").value.trim();
+  const address = document.getElementById("edit-house-address").value.trim();
+  const stop_role = document.getElementById("edit-house-role").value || null;
+  const visit_mins = Math.max(5, parseInt(document.getElementById("edit-house-mins").value, 10) || 20);
+  const phone = document.getElementById("edit-house-phone").value.trim();
+  const notes = document.getElementById("edit-house-notes").value.trim();
+
+  if (!family_name || !address) return showToast("Family name & address required");
+
+  // Re-geocode if address changed
+  const existing = (wardPayload.ward_houses || []).find((x) => x.id === id);
+  let lat = existing ? existing.lat : null;
+  let lng = existing ? existing.lng : null;
+  if (existing && existing.address !== address) {
+    const c = await window.CarolOptimizer.geocodeAddress(address);
+    if (c) {
+      lat = c.lat;
+      lng = c.lng;
+    }
+  }
+
+  const { data } = await sbClient.rpc("admin_upsert_single_house", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_house: { id, family_name, address, stop_role, visit_mins, phone, notes, lat, lng }
+  });
+  if (data && data.ok) {
+    closeModal("edit-house-modal");
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Saved ${family_name}`);
+  } else {
+    showToast(`Save failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+  }
+}
+
+async function deleteSingleHouse(houseId, familyName) {
+  if (!window.confirm(`Delete "${familyName}" from this carol day?`)) return;
+  const { data } = await sbClient.rpc("admin_delete_house", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_house_id: houseId
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Deleted ${familyName}`);
+  } else {
+    showToast(`Delete failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+  }
 }
 
 function moveOptDraft(idx, delta) {
@@ -1526,22 +1783,85 @@ async function clonePreviousYear() {
 }
 
 async function saveAdminWardSettings() {
+  const prev = (wardPayload && wardPayload.ward_settings) || {};
   const { data } = await sbClient.rpc("admin_save_ward_settings", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code,
     p_settings: {
       default_visit_mins: parseInt(document.getElementById("adm-visit-mins").value, 10) || 20,
-      drive_buffer_mins: parseInt(document.getElementById("adm-drive-buffer").value, 10) || 5,
+      drive_buffer_mins: prev.drive_buffer_mins || 5,
       coordinator_name: document.getElementById("adm-coord-name").value.trim(),
       coordinator_phone: document.getElementById("adm-coord-phone").value.trim(),
-      meeting_point: document.getElementById("adm-meeting-point").value.trim(),
+      meeting_point: prev.meeting_point || "",
       instructions_banner: document.getElementById("adm-banner").value.trim()
     }
   });
   if (data && data.ok) {
     await syncActiveWardOnline(true);
-    showToast("Ward settings saved!");
+    showToast("Ward info saved!");
   }
+}
+
+// ---------- Live Message Broadcast Popup ----------
+
+function openBroadcastModal() {
+  document.getElementById("broadcast-text-input").value = "";
+  document.getElementById("broadcast-pin-banner").checked = true;
+  document.getElementById("broadcast-modal").classList.add("open");
+}
+
+function setBroadcastPreset(text) {
+  document.getElementById("broadcast-text-input").value = text;
+}
+
+function showLiveBroadcastPopup(message, sentAtIso) {
+  document.getElementById("live-broadcast-text").textContent = message;
+  const dt = sentAtIso ? new Date(sentAtIso) : new Date();
+  document.getElementById("live-broadcast-time").textContent =
+    `${CFG.WARDS[activeWardId].full} • ${minutesToTimeStr(dt.getHours() * 60 + dt.getMinutes())}`;
+  document.getElementById("live-broadcast-popup").classList.add("open");
+  playSoftChime();
+}
+
+async function sendBroadcastMessage() {
+  const message = document.getElementById("broadcast-text-input").value.trim();
+  const pinBanner = document.getElementById("broadcast-pin-banner").checked;
+  if (!message) return showToast("Type a message first");
+
+  const sentAt = new Date().toISOString();
+
+  // Broadcast live via Supabase Realtime to all connected carolers in this ward
+  if (realtimeChannel) {
+    realtimeChannel.send({
+      type: "broadcast",
+      event: "broadcast_alert",
+      payload: {
+        ward_id: activeWardId,
+        message,
+        pinned: pinBanner,
+        sent_at: sentAt
+      }
+    });
+  }
+
+  // If Admin is unlocked & pin checked, persist banner in ward_settings
+  if (pinBanner && wardPayload) {
+    if (!wardPayload.ward_settings) wardPayload.ward_settings = {};
+    wardPayload.ward_settings.instructions_banner = message;
+    localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
+    if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+      await sbClient.rpc("admin_save_ward_settings", {
+        p_ward_id: activeWardId,
+        p_admin_code: adminSession.code,
+        p_settings: { ...wardPayload.ward_settings, instructions_banner: message }
+      });
+    }
+    render();
+  }
+
+  closeModal("broadcast-modal");
+  showLiveBroadcastPopup(message, sentAt);
+  showToast("📢 Broadcast sent to all connected devices!");
 }
 
 function generateRandomPin() {
@@ -1593,11 +1913,8 @@ async function rotateWardAdminCode() {
 // ---------- User Settings & Utilities ----------
 
 function openSettingsModal() {
-  const creds = window.getSupabaseCredentials();
   document.getElementById("cfg-nav-app").value = prefs.primaryNavApp || "google";
   document.getElementById("cfg-wakelock").value = prefs.autoWakeLock ? "on" : "off";
-  document.getElementById("cfg-sb-url").value = creds.url;
-  document.getElementById("cfg-sb-key").value = creds.anonKey;
   document.getElementById("settings-modal").classList.add("open");
 }
 
@@ -1606,18 +1923,23 @@ function saveUserSettings() {
   prefs.autoWakeLock = document.getElementById("cfg-wakelock").value === "on";
   savePrefs();
 
-  const sbUrl = document.getElementById("cfg-sb-url").value.trim().replace(/\/+$/, "");
-  const sbKey = document.getElementById("cfg-sb-key").value.trim();
-  if (sbUrl) localStorage.setItem("carol_sb_url", sbUrl);
-  if (sbKey) localStorage.setItem("carol_sb_anon_key", sbKey);
-
   if (prefs.autoWakeLock) acquireWakeLockIfEnabled();
   else releaseWakeLock();
 
   closeModal("settings-modal");
-  bootActiveWard();
+  render();
   showToast("Settings saved");
 }
+
+// Close ANY open modal/popup with Escape key
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    document.querySelectorAll(".modal-backdrop.open").forEach((m) => {
+      if (m.id === "songbook-modal") closeSongbookModal();
+      else m.classList.remove("open");
+    });
+  }
+});
 
 function openFormatHelpModal() {
   document.getElementById("format-help-modal").classList.add("open");
