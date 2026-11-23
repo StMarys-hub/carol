@@ -1,10 +1,12 @@
-const CACHE_NAME = "ward4-carol-pwa-v10";
+const CACHE_NAME = "stmarys-carol-multiward-v1";
 const PRECACHE_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=10",
-  "./data.js?v=10",
-  "./app.js?v=10",
+  "./styles.css?v=1",
+  "./supabase-config.js?v=1",
+  "./optimizer.js?v=1",
+  "./songbook.js?v=1",
+  "./app.js?v=1",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",
@@ -36,7 +38,7 @@ self.addEventListener("fetch", (event) => {
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Network-first with offline cache fallback so index.html and app.js never go out of sync
+  // Network-first with offline cache fallback so app shell files never skew
   event.respondWith(
     fetch(event.request)
       .then((response) => {

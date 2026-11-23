@@ -1,115 +1,35 @@
-/* Ward 4 (Kunjachan Ward) Christmas Carol PWA — Main Application Logic */
+/* St. Mary's Multi-Ward Christmas Carol PWA (W1–W5)
+ * Zero frontend secrets, zero public PII, strict per-ward isolation,
+ * Supabase Gatekeeper RPCs + PII-free Realtime + Offline Cache + 4-Tab Admin Portal
+ */
 
-const STORAGE_KEY = "ward4_carol_2026_pwa_v1";
-
-// Register real Service Worker for offline-first PWA support
+// Register Service Worker for /carol/
 if ("serviceWorker" in navigator) {
   window.addEventListener("load", () => {
     navigator.serviceWorker.register("./sw.js").catch(() => {});
   });
 }
 
-let deferredInstallPrompt = null;
-window.addEventListener("beforeinstallprompt", (e) => {
-  e.preventDefault();
-  deferredInstallPrompt = e;
-  if (!sessionStorage.getItem("ward4_install_dismissed")) {
-    const banner = document.getElementById("install-banner");
-    if (banner) banner.classList.add("visible");
-  }
-});
+// ---------- Global App State ----------
+const CFG = window.CAROL_APP_CONFIG;
+let sbClient = null;
+let realtimeChannel = null;
 
-window.addEventListener("appinstalled", () => {
-  deferredInstallPrompt = null;
-  const banner = document.getElementById("install-banner");
-  if (banner) banner.classList.remove("visible");
-  showToast("App installed on your Home Screen!");
-});
+let activeWardId = resolveInitialWard();
+let wardPayload = null;        // Unlocked data for activeWardId
+let activeDayId = null;
+let adminSession = { unlocked: false, code: "", role: null, wardId: null };
+let parsedImportRows = [];
+let optimizerDraft = [];
 
-function triggerInstallPrompt() {
-  if (deferredInstallPrompt) {
-    deferredInstallPrompt.prompt();
-    deferredInstallPrompt.userChoice.then(() => {
-      deferredInstallPrompt = null;
-      document.getElementById("install-banner").classList.remove("visible");
-    });
-  } else {
-    openInstallHelpModal();
-  }
-}
-
-function dismissInstallBanner() {
-  sessionStorage.setItem("ward4_install_dismissed", "1");
-  document.getElementById("install-banner").classList.remove("visible");
-}
-
-function openInstallHelpModal() {
-  document.getElementById("install-help-modal").classList.add("open");
-}
-
-// ---------- State Management ----------
-
-function buildDefaultDayState(dayKey) {
-  const cfg = window.CAROL_DATA.days[dayKey];
-  return {
-    startTime: cfg.defaultStartTime,
-    defaultVisitMins: cfg.defaultVisitMins,
-    lockedFinalId: cfg.lockedFinalId,
-    stops: cfg.stops.map((s) => ({
-      ...s,
-      visited: false,
-      checkedInAt: null
-    }))
-  };
-}
-
-function getDefaultActiveDay() {
-  const now = new Date();
-  // Automatically switch to Day 2 after Dec 13, 2026
-  const day2Switch = new Date(2026, 11, 13);
-  return now >= day2Switch ? "day2" : "day1";
-}
-
-function loadState() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      const parsed = JSON.parse(raw);
-      if (parsed && parsed.days && parsed.days.day1 && parsed.days.day2) {
-        return parsed;
-      }
-    }
-  } catch (e) {}
-  return {
-    activeDay: getDefaultActiveDay(),
-    primaryNavApp: "google",
-    largePrint: false,
-    coordName: "",
-    coordPhone: "",
-    songs: JSON.parse(JSON.stringify(window.CAROL_DATA.defaultSongs)),
-    days: {
-      day1: buildDefaultDayState("day1"),
-      day2: buildDefaultDayState("day2")
-    }
-  };
-}
-
-function saveState() {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch (e) {}
-}
-
-let state = loadState();
+let prefs = loadPrefs();
 let snapshotOpen = false;
-let activeSongIdx = 0;
-let songFontScale = 1.08;
 let searchQuery = "";
-let wakeLockSentinel = null;
 let gpsWatchId = null;
 let userCoords = null;
+let wakeLockSentinel = null;
 
-// 20-Min House Caroling Timer state
+// 20-Min House Countdown Timer
 let houseTimer = {
   stopId: null,
   remainingSec: 20 * 60,
@@ -118,6 +38,546 @@ let houseTimer = {
   warned3Min: false,
   finished: false
 };
+
+// ---------- Ward Routing & Namespaced Storage ----------
+
+function resolveInitialWard() {
+  const params = new URLSearchParams(window.location.search);
+  const qWard = (params.get("ward") || "").trim().toUpperCase();
+  if (CFG.WARDS[qWard]) {
+    localStorage.setItem("carol_active_ward", qWard);
+    return qWard;
+  }
+  const saved = (localStorage.getItem("carol_active_ward") || "W4").toUpperCase();
+  return CFG.WARDS[saved] ? saved : "W4";
+}
+
+function keyUserCode(wardId) {
+  return `carol_user_code_${wardId}`;
+}
+function keyOfflineRoute(wardId) {
+  return `carol_offline_route_${wardId}`;
+}
+function keyLocalSongs(wardId) {
+  return `carol_local_songs_${wardId}`;
+}
+
+function loadPrefs() {
+  try {
+    const raw = localStorage.getItem("carol_ui_prefs");
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
+  return {
+    primaryNavApp: "google",
+    largePrint: false,
+    lightTheme: false,
+    autoWakeLock: true
+  };
+}
+function savePrefs() {
+  try {
+    localStorage.setItem("carol_ui_prefs", JSON.stringify(prefs));
+  } catch (e) {}
+}
+
+function initSupabaseClient() {
+  const { url, anonKey } = window.getSupabaseCredentials();
+  if (url && anonKey && window.supabase && window.supabase.createClient) {
+    sbClient = window.supabase.createClient(url, anonKey, {
+      auth: { persistSession: false, autoRefreshToken: false }
+    });
+    return true;
+  }
+  sbClient = null;
+  return false;
+}
+
+function switchWard(newWardId) {
+  const w = (newWardId || "W4").toUpperCase();
+  if (!CFG.WARDS[w]) return;
+  activeWardId = w;
+  localStorage.setItem("carol_active_ward", w);
+
+  // Update URL cleanly via history.replaceState without reloading
+  const url = new URL(window.location.href);
+  url.searchParams.set("ward", w);
+  window.history.replaceState({}, "", url.toString());
+
+  // Reset ward-scoped runtime state & admin lock
+  if (adminSession.wardId !== w) {
+    adminSession = { unlocked: false, code: "", role: null, wardId: null };
+  }
+  wardPayload = null;
+  activeDayId = null;
+  searchQuery = "";
+  const searchEl = document.getElementById("search-input");
+  if (searchEl) searchEl.value = "";
+  unsubscribeRealtime();
+  bootActiveWard();
+}
+
+// ---------- Boot, Lock Screen & Offline Resilience ----------
+
+async function bootActiveWard() {
+  applyUiPrefs();
+  updateWardHeaderLabels();
+
+  const hasSb = initSupabaseClient();
+  const missingNotice = document.getElementById("supabase-missing-notice");
+  if (missingNotice) missingNotice.style.display = hasSb ? "none" : "block";
+
+  const cachedCode = localStorage.getItem(keyUserCode(activeWardId));
+  const cachedRouteRaw = localStorage.getItem(keyOfflineRoute(activeWardId));
+
+  if (!cachedCode) {
+    showLockScreen("");
+    return;
+  }
+
+  // If cached route exists, render immediately for instant field startup, then silently revalidate online
+  if (cachedRouteRaw) {
+    try {
+      const cached = JSON.parse(cachedRouteRaw);
+      if (cached && cached.ward_id === activeWardId) {
+        wardPayload = cached;
+        selectDefaultDay();
+        showDashboard();
+      }
+    } catch (e) {}
+  }
+
+  await syncActiveWardOnline(true);
+}
+
+async function syncActiveWardOnline(silent = false) {
+  const cachedCode = localStorage.getItem(keyUserCode(activeWardId));
+  if (!cachedCode) return;
+
+  if (!sbClient) {
+    setOfflineBanner(true);
+    if (!wardPayload) showLockScreen("Connect Supabase in ⚙️ Settings to unlock this ward.");
+    return;
+  }
+
+  try {
+    const { data, error } = await sbClient.rpc("get_ward_carol_data", {
+      p_ward_id: activeWardId,
+      p_user_code: cachedCode
+    });
+
+    if (error) throw error;
+
+    if (!data || !data.ok) {
+      const errCode = data ? data.error : "UNKNOWN_ERROR";
+      if (errCode === "INVALID_WARD_CODE") {
+        // Admin reset the Ward Access Code — instant revocation!
+        localStorage.removeItem(keyUserCode(activeWardId));
+        localStorage.removeItem(keyOfflineRoute(activeWardId));
+        wardPayload = null;
+        unsubscribeRealtime();
+        showLockScreen("Your Ward Access Code was updated by the Ward Admin. Please enter the new code.");
+        return;
+      }
+      if (errCode === "RATE_LIMITED") {
+        showLockScreen("Too many attempts. Please wait 15 minutes and try again.");
+        return;
+      }
+      throw new Error(errCode);
+    }
+
+    setOfflineBanner(false);
+    wardPayload = data;
+    localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(data));
+    selectDefaultDay();
+    showDashboard();
+    subscribeRealtime();
+    if (!silent) showToast(`Synced ${CFG.WARDS[activeWardId].short} live schedule`);
+  } catch (err) {
+    // Offline between houses: continue serving already-unlocked cached route seamlessly
+    if (wardPayload) {
+      setOfflineBanner(true);
+      if (!silent) showToast("Offline — using saved route");
+    } else {
+      showLockScreen("Unable to reach server. Check internet connection or Supabase settings.");
+    }
+  }
+}
+
+async function handleUnlockSubmit(e) {
+  e.preventDefault();
+  const input = document.getElementById("ward-code-input");
+  const errEl = document.getElementById("lock-error");
+  const btn = document.getElementById("btn-unlock-submit");
+  const code = (input.value || "").trim();
+
+  if (!code) {
+    errEl.textContent = "Please enter your Ward Access Code.";
+    return;
+  }
+  if (!initSupabaseClient()) {
+    errEl.textContent = "Please connect Supabase in ⚙️ Settings first.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Verifying...";
+  errEl.textContent = "";
+
+  try {
+    const { data, error } = await sbClient.rpc("get_ward_carol_data", {
+      p_ward_id: activeWardId,
+      p_user_code: code
+    });
+    if (error) throw error;
+
+    if (!data || !data.ok) {
+      errEl.textContent =
+        data && data.error === "RATE_LIMITED"
+          ? "Too many invalid tries. Please wait 15 minutes."
+          : "Invalid Ward Access Code. Please check with your Ward Coordinator.";
+      return;
+    }
+
+    localStorage.setItem(keyUserCode(activeWardId), code);
+    localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(data));
+    input.value = "";
+    wardPayload = data;
+    setOfflineBanner(false);
+    selectDefaultDay();
+    showDashboard();
+    subscribeRealtime();
+    showToast(`Unlocked ${CFG.WARDS[activeWardId].full}!`);
+  } catch (err) {
+    errEl.textContent = "Connection error. Check Supabase URL/Key or internet.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "🔓 Unlock Ward Schedule";
+  }
+}
+
+function lockCurrentWard() {
+  localStorage.removeItem(keyUserCode(activeWardId));
+  localStorage.removeItem(keyOfflineRoute(activeWardId));
+  wardPayload = null;
+  adminSession = { unlocked: false, code: "", role: null, wardId: null };
+  unsubscribeRealtime();
+  closeModal("settings-modal");
+  showLockScreen("");
+  showToast(`${CFG.WARDS[activeWardId].short} locked`);
+}
+
+function showLockScreen(msg) {
+  document.getElementById("lock-screen-view").style.display = "block";
+  document.getElementById("dashboard-view").style.display = "none";
+  document.getElementById("unlocked-header-stats").style.display = "none";
+  document.getElementById("ward-instructions-banner").classList.remove("visible");
+  document.getElementById("lock-error").textContent = msg || "";
+  setOfflineBanner(false);
+  updateWardHeaderLabels();
+}
+
+function showDashboard() {
+  document.getElementById("lock-screen-view").style.display = "none";
+  document.getElementById("dashboard-view").style.display = "block";
+  document.getElementById("unlocked-header-stats").style.display = "block";
+  acquireWakeLockIfEnabled();
+  render();
+}
+
+function setOfflineBanner(isOffline) {
+  const el = document.getElementById("offline-banner");
+  if (el) el.classList.toggle("visible", !!isOffline);
+}
+
+// ---------- PII-Free Supabase Realtime Sync ----------
+
+function subscribeRealtime() {
+  if (!sbClient) return;
+  unsubscribeRealtime();
+  realtimeChannel = sbClient
+    .channel(`carol-live-${activeWardId}`)
+    .on("broadcast", { event: "eta_shift" }, (payload) => {
+      // Strictly PII-free payload: { ward_id, carol_day_id, current_stop_index, actual_timestamp }
+      const p = payload && payload.payload;
+      if (!p || p.ward_id !== activeWardId) return;
+      syncActiveWardOnline(true);
+    })
+    .subscribe();
+}
+
+function unsubscribeRealtime() {
+  if (realtimeChannel && sbClient) {
+    try {
+      sbClient.removeChannel(realtimeChannel);
+    } catch (e) {}
+    realtimeChannel = null;
+  }
+}
+
+function broadcastPiiFreeEtaShift(carolDayId, currentStopIndex, actualTimestamp) {
+  if (!realtimeChannel) return;
+  realtimeChannel.send({
+    type: "broadcast",
+    event: "eta_shift",
+    payload: {
+      ward_id: activeWardId,
+      carol_day_id: carolDayId,
+      current_stop_index: currentStopIndex,
+      actual_timestamp: actualTimestamp || new Date().toISOString()
+    }
+  });
+}
+
+// ---------- Screen Wake Lock ----------
+
+async function acquireWakeLockIfEnabled() {
+  if (!prefs.autoWakeLock || !("wakeLock" in navigator) || wakeLockSentinel) return;
+  try {
+    wakeLockSentinel = await navigator.wakeLock.request("screen");
+    wakeLockSentinel.addEventListener("release", () => {
+      wakeLockSentinel = null;
+    });
+  } catch (e) {}
+}
+
+function releaseWakeLock() {
+  if (wakeLockSentinel) {
+    wakeLockSentinel.release().catch(() => {});
+    wakeLockSentinel = null;
+  }
+}
+
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "hidden") {
+    releaseWakeLock();
+  } else if (wardPayload) {
+    acquireWakeLockIfEnabled();
+  }
+});
+
+// ---------- Theme & Display Preferences ----------
+
+function applyUiPrefs() {
+  document.documentElement.classList.toggle("large-print", !!prefs.largePrint);
+  document.documentElement.classList.toggle("light-theme", !!prefs.lightTheme);
+
+  const lpBtn = document.getElementById("btn-large-print");
+  if (lpBtn) lpBtn.classList.toggle("active-toggle", !!prefs.largePrint);
+
+  const themeBtn = document.getElementById("btn-theme");
+  if (themeBtn) themeBtn.textContent = prefs.lightTheme ? "☀️" : "🌙";
+
+  const adminBtn = document.getElementById("btn-admin-open");
+  if (adminBtn) adminBtn.classList.toggle("admin-unlocked", adminSession.unlocked && adminSession.wardId === activeWardId);
+}
+
+function toggleLargePrint() {
+  prefs.largePrint = !prefs.largePrint;
+  savePrefs();
+  applyUiPrefs();
+  showToast(prefs.largePrint ? "Large Print Mode ON" : "Standard Print Size");
+}
+
+function toggleTheme() {
+  prefs.lightTheme = !prefs.lightTheme;
+  savePrefs();
+  applyUiPrefs();
+  showToast(prefs.lightTheme ? "Daytime Snow Theme ON ☀️" : "Midnight Evergreen Night Theme 🌙");
+}
+
+function updateWardHeaderLabels() {
+  const w = CFG.WARDS[activeWardId];
+  const sel = document.getElementById("ward-switcher");
+  if (sel) sel.value = activeWardId;
+  document.getElementById("header-ward-title").textContent = w.full;
+  document.getElementById("lock-ward-badge").textContent = w.full;
+  document.getElementById("footer-ward-title").textContent = `⛪ ${CFG.churchName} • ${w.full}`;
+  document.title = `${w.full} • St. Mary's Carol`;
+}
+
+// ---------- Active Day Selection & Schedule Math ----------
+
+function getDays() {
+  return (wardPayload && wardPayload.carol_days) || [];
+}
+
+function getDayHouses(dayId) {
+  const all = (wardPayload && wardPayload.ward_houses) || [];
+  return all
+    .filter((h) => h.carol_day_id === dayId)
+    .sort((a, b) => (a.stop_order || 0) - (b.stop_order || 0));
+}
+
+function selectDefaultDay() {
+  const days = getDays();
+  if (!days.length) {
+    activeDayId = null;
+    return;
+  }
+  if (activeDayId && days.some((d) => d.id === activeDayId)) return;
+
+  const todayIso = new Date().toISOString().slice(0, 10);
+  const exactToday = days.find((d) => d.carol_date === todayIso);
+  if (exactToday) {
+    activeDayId = exactToday.id;
+    return;
+  }
+  const upcoming = days.find((d) => d.carol_date && d.carol_date > todayIso);
+  activeDayId = upcoming ? upcoming.id : days[0].id;
+}
+
+function switchDay(dayId) {
+  activeDayId = dayId;
+  searchQuery = "";
+  const searchEl = document.getElementById("search-input");
+  if (searchEl) searchEl.value = "";
+  document.getElementById("search-clear").classList.remove("visible");
+  render();
+}
+
+function timeStrToMinutes(hhmm) {
+  const [h, m] = (hhmm || "14:00").split(":").map(Number);
+  return h * 60 + (m || 0);
+}
+
+function minutesToTimeStr(totalMins) {
+  const wrapped = ((Math.round(totalMins) % 1440) + 1440) % 1440;
+  const h24 = Math.floor(wrapped / 60);
+  const m = wrapped % 60;
+  const period = h24 >= 12 ? "PM" : "AM";
+  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
+  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
+}
+
+function calculateSchedule(dayObj, houses) {
+  const defaultVisit = (dayObj && dayObj.avg_visit_mins) || 20;
+  let cursor = timeStrToMinutes(dayObj ? dayObj.start_time : "14:00");
+  let totalTravelMins = 0;
+  let totalCarolMins = 0;
+
+  const computed = houses.map((h, index) => {
+    const driveFromPrev = index === 0 ? 0 : Number(h.drive_mins) || 0;
+    if (index > 0) {
+      cursor += driveFromPrev;
+      totalTravelMins += driveFromPrev;
+    }
+    const arrivalMins = cursor;
+    const duration = Number(h.visit_mins) || defaultVisit;
+    const departureMins = arrivalMins + duration;
+    totalCarolMins += duration;
+    cursor = departureMins;
+
+    let distFromUser = null;
+    if (userCoords && typeof h.lat === "number" && typeof h.lng === "number") {
+      distFromUser = window.CarolOptimizer.haversineMiles(userCoords.lat, userCoords.lng, h.lat, h.lng);
+    }
+
+    return {
+      ...h,
+      index,
+      isLast: index === houses.length - 1,
+      driveFromPrev,
+      arrivalFormatted: minutesToTimeStr(arrivalMins),
+      departureFormatted: minutesToTimeStr(departureMins),
+      duration,
+      distFromUser
+    };
+  });
+
+  return { computed, totalTravelMins, totalCarolMins };
+}
+
+function getNavUrl(address, lat, lng) {
+  const encoded = encodeURIComponent(address);
+  if (prefs.primaryNavApp === "apple") {
+    return `https://maps.apple.com/?daddr=${encoded}&dirflg=d`;
+  }
+  if (prefs.primaryNavApp === "waze") {
+    return typeof lat === "number" && typeof lng === "number"
+      ? `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`
+      : `https://waze.com/ul?q=${encoded}&navigate=yes`;
+  }
+  return `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
+}
+
+// ---------- Offline SVG Route Map ----------
+
+function renderOfflineRouteSvg(computed, nextIndex) {
+  const pts = computed.filter((s) => typeof s.lat === "number" && typeof s.lng === "number");
+  if (pts.length < 2) {
+    return `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.8rem;">Add geocoded coordinates in Admin to preview the offline map.</div>`;
+  }
+  const lats = pts.map((p) => p.lat);
+  const lngs = pts.map((p) => p.lng);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+  const cosLat = Math.cos(((minLat + maxLat) / 2) * (Math.PI / 180));
+  const W = 360;
+  const H = 195;
+  const pad = 24;
+
+  const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
+  const spanLat = Math.max(maxLat - minLat, 0.005);
+  const scale = Math.min((W - pad * 2) / spanLng, (H - pad * 2) / spanLat);
+  const offX = (W - spanLng * scale) / 2;
+  const offY = (H - spanLat * scale) / 2;
+
+  const projected = computed.map((s) =>
+    typeof s.lat === "number" && typeof s.lng === "number"
+      ? { x: offX + (s.lng - minLng) * cosLat * scale, y: H - (offY + (s.lat - minLat) * scale) }
+      : null
+  );
+
+  // Light collision repulsion so walkable clusters remain readable
+  const valid = projected.filter(Boolean);
+  for (let pass = 0; pass < 8; pass++) {
+    for (let i = 0; i < valid.length; i++) {
+      for (let j = i + 1; j < valid.length; j++) {
+        const dx = valid[j].x - valid[i].x;
+        const dy = valid[j].y - valid[i].y;
+        const d = Math.hypot(dx, dy) || 0.01;
+        if (d < 20) {
+          const push = (20 - d) / 2;
+          valid[i].x = Math.max(14, Math.min(W - 14, valid[i].x - (dx / d) * push));
+          valid[i].y = Math.max(14, Math.min(H - 14, valid[i].y - (dy / d) * push));
+          valid[j].x = Math.max(14, Math.min(W - 14, valid[j].x + (dx / d) * push));
+          valid[j].y = Math.max(14, Math.min(H - 14, valid[j].y + (dy / d) * push));
+        }
+      }
+    }
+  }
+
+  let linesSvg = "";
+  for (let i = 1; i < computed.length; i++) {
+    const p1 = projected[i - 1];
+    const p2 = projected[i];
+    if (!p1 || !p2) continue;
+    const isWalk = (computed[i].distance_label || "").toLowerCase().includes("walk");
+    const isDone = computed[i - 1].visited && computed[i].visited;
+    linesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${isDone ? "#34D399" : isWalk ? "#C084FC" : "#475569"}" stroke-width="2" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+  }
+
+  let pinsSvg = "";
+  computed.forEach((s, idx) => {
+    const p = projected[idx];
+    if (!p) return;
+    const isCur = idx === nextIndex;
+    const fill = s.visited ? "#065F46" : isCur ? "#F59E0B" : s.isLast ? "#DC2626" : "#0F172A";
+    const stroke = s.visited ? "#34D399" : isCur ? "#FFFFFF" : s.isLast ? "#FCA5A5" : "#94A3B8";
+    pinsSvg += `
+      <g style="cursor:pointer;" onclick="jumpToStop('${s.id}')">
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11 : 9.5}" fill="${fill}" stroke="${stroke}" stroke-width="1.8" />
+        <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${isCur ? "#000" : "#FFF"}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
+      </g>
+    `;
+  });
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:215px;" role="img" aria-label="Offline route map">${linesSvg}${pinsSvg}</svg>`;
+}
+
+// ---------- 20-Min House Countdown Timer ----------
 
 function playSoftChime() {
   try {
@@ -140,13 +600,6 @@ function playSoftChime() {
   if (navigator.vibrate) navigator.vibrate([180, 90, 180]);
 }
 
-function formatTimerMMSS(sec) {
-  const s = Math.max(0, Math.floor(sec));
-  const m = Math.floor(s / 60);
-  const r = s % 60;
-  return `${String(m).padStart(2, "0")}:${String(r).padStart(2, "0")}`;
-}
-
 function resetHouseTimer(stopId, durationMins) {
   if (houseTimer.intervalId) clearInterval(houseTimer.intervalId);
   houseTimer = {
@@ -159,27 +612,24 @@ function resetHouseTimer(stopId, durationMins) {
   };
 }
 
-function updateTimerButtonUI() {
+function updateTimerButtonUI(durationMins) {
   const btn = document.getElementById("hero-timer-btn");
   if (!btn) return;
-  btn.classList.remove("running", "warn", "done");
+  const dur = durationMins || 20;
+  btn.classList.remove("running", "done");
+  const mm = String(Math.floor(houseTimer.remainingSec / 60)).padStart(2, "0");
+  const ss = String(houseTimer.remainingSec % 60).padStart(2, "0");
   if (houseTimer.finished) {
     btn.classList.add("done");
-    btn.textContent = "🔔 00:00 • Reset";
+    btn.textContent = "🔔 00:00";
   } else if (houseTimer.running) {
-    btn.classList.add(houseTimer.remainingSec <= 180 ? "warn" : "running");
-    btn.textContent = `⏱️ ${formatTimerMMSS(houseTimer.remainingSec)}`;
-  } else if (houseTimer.remainingSec < (currentHeroDurationMins() * 60)) {
-    btn.textContent = `▶ ${formatTimerMMSS(houseTimer.remainingSec)}`;
+    btn.classList.add("running");
+    btn.textContent = `⏱️ ${mm}:${ss}`;
+  } else if (houseTimer.remainingSec < dur * 60) {
+    btn.textContent = `▶ ${mm}:${ss}`;
   } else {
-    btn.textContent = `⏱️ ${currentHeroDurationMins()}m Timer`;
+    btn.textContent = `⏱️ ${dur}m Timer`;
   }
-}
-
-function currentHeroDurationMins() {
-  const daySt = currentDayState();
-  const next = daySt.stops.find((s) => !s.visited);
-  return next ? Number(next.visitMins) || daySt.defaultVisitMins || 20 : 20;
 }
 
 function toggleHouseTimer(stopId, durationMins) {
@@ -190,8 +640,8 @@ function toggleHouseTimer(stopId, durationMins) {
     clearInterval(houseTimer.intervalId);
     houseTimer.intervalId = null;
     houseTimer.running = false;
-    updateTimerButtonUI();
-    showToast("House timer paused");
+    updateTimerButtonUI(durationMins);
+    showToast("Timer paused");
     return;
   }
   houseTimer.running = true;
@@ -200,7 +650,7 @@ function toggleHouseTimer(stopId, durationMins) {
     if (houseTimer.remainingSec === 180 && !houseTimer.warned3Min) {
       houseTimer.warned3Min = true;
       showToast("⏳ 3 mins left — wrap up & group photo!");
-      if (navigator.vibrate) navigator.vibrate(150);
+      if (navigator.vibrate) navigator.vibrate(140);
     }
     if (houseTimer.remainingSec <= 0) {
       houseTimer.remainingSec = 0;
@@ -209,105 +659,981 @@ function toggleHouseTimer(stopId, durationMins) {
       clearInterval(houseTimer.intervalId);
       houseTimer.intervalId = null;
       playSoftChime();
-      showToast("🔔 20 mins up — time to head to the next house!");
+      showToast("🔔 Time's up — head to the next house!");
     }
-    updateTimerButtonUI();
+    updateTimerButtonUI(durationMins);
   }, 1000);
-  updateTimerButtonUI();
+  updateTimerButtonUI(durationMins);
   showToast(`⏱️ Started ${durationMins}-min carol timer`);
 }
 
-function sendHostHeadsUp(family, etaStr) {
-  const msg = `🎄 Hi ${family}! Ward 4 Carol is on the way — our current ETA to your home is ${etaStr}. See you soon! 🎶`;
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(msg).catch(() => {});
+// ---------- Main Dashboard Render ----------
+
+function render() {
+  applyUiPrefs();
+  updateWardHeaderLabels();
+  if (!wardPayload) return;
+
+  const settings = wardPayload.ward_settings || {};
+  const bannerEl = document.getElementById("ward-instructions-banner");
+  if (settings.instructions_banner && settings.instructions_banner.trim()) {
+    document.getElementById("ward-instructions-text").textContent = `📌 ${settings.instructions_banner}`;
+    bannerEl.classList.add("visible");
+  } else {
+    bannerEl.classList.remove("visible");
   }
-  showToast(`Heads-up copied for ${family}!`);
+
+  const days = getDays();
+  const switcherEl = document.getElementById("day-switcher");
+  if (days.length <= 1) {
+    switcherEl.classList.add("hidden");
+  } else {
+    switcherEl.classList.remove("hidden");
+    switcherEl.innerHTML = days
+      .map((d) => {
+        const dHouses = getDayHouses(d.id);
+        const doneCnt = dHouses.filter((h) => h.visited).length;
+        const sub = doneCnt > 0 ? `${doneCnt}/${dHouses.length} Done` : `${minutesToTimeStr(timeStrToMinutes(d.start_time))} • ${dHouses.length}`;
+        return `
+          <button class="day-tab ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">
+            <span class="day-tab-title">🎄 ${escapeHtml(d.label)}</span>
+            <span class="day-tab-sub">${sub}</span>
+          </button>
+        `;
+      })
+      .join("");
+  }
+
+  const activeDay = days.find((d) => d.id === activeDayId) || days[0] || null;
+  const houses = activeDay ? getDayHouses(activeDay.id) : [];
+  const { computed, totalTravelMins, totalCarolMins } = calculateSchedule(activeDay, houses);
+
+  const seasonName = wardPayload.active_season ? wardPayload.active_season.name : "Christmas Carol";
+  document.getElementById("header-subtitle").textContent = activeDay
+    ? `${seasonName} • ${activeDay.label} • Gather ${minutesToTimeStr(timeStrToMinutes(activeDay.start_time))}`
+    : `${seasonName} • No carol days configured yet`;
+
+  const completedStops = computed.filter((s) => s.visited);
+  const upcomingStops = computed.filter((s) => !s.visited);
+  const currentStop = upcomingStops[0] || null;
+  const upNextStop = upcomingStops[1] || null;
+  const finalStop = computed[computed.length - 1] || null;
+
+  document.getElementById("metric-progress").textContent = `${completedStops.length} / ${computed.length}`;
+  document.getElementById("metric-dinner-eta").textContent = finalStop ? finalStop.arrivalFormatted : "--:--";
+  document.getElementById("metric-ratios").textContent = `${totalTravelMins}m / ${totalCarolMins}m`;
+  document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
+
+  // Snapshot Map + Chunked Multi-Stop Google Maps Legs
+  document.getElementById("snapshot-miles-label").textContent = `• ${computed.length} stops`;
+  document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, currentStop ? currentStop.index : -1);
+  const mapLegs = window.CarolOptimizer.buildChunkedGoogleMapsLegs(computed, 9);
+  document.getElementById("snapshot-map-links").innerHTML = mapLegs
+    .map((l) => `<a class="map-leg-btn" href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`)
+    .join("");
+
+  // Hero Spotlight: Current & Up-Next
+  const heroEl = document.getElementById("hero-spotlight");
+  if (!computed.length) {
+    heroEl.innerHTML = `
+      <section class="hero-card">
+        <div class="hero-family">No houses scheduled yet</div>
+        <div class="hero-address">Ward Admins can tap 🔐 to import houses or clone last year's season.</div>
+      </section>
+    `;
+  } else if (currentStop) {
+    if (houseTimer.stopId !== currentStop.id) {
+      resetHouseTimer(currentStop.id, currentStop.duration);
+    }
+    const navUrl = getNavUrl(currentStop.address, currentStop.lat, currentStop.lng);
+    const isWalk = (currentStop.distance_label || "").toLowerCase().includes("walk");
+    const callHtml = currentStop.phone
+      ? `<a class="footer-chip" href="tel:${escapeHtml(currentStop.phone.replace(/[^\d+]/g, ""))}">📞 Call Host</a>`
+      : "";
+    const upNextHtml = upNextStop
+      ? `<div class="up-next-strip"><span>⏭️ <strong>Up Next (#${upNextStop.index + 1}):</strong> ${escapeHtml(upNextStop.family_name)}</span><span>ETA ${upNextStop.arrivalFormatted}</span></div>`
+      : "";
+
+    heroEl.innerHTML = `
+      <section class="hero-card">
+        <div class="hero-eyebrow">
+          <span class="hero-tag">🔴 LIVE • Stop #${currentStop.index + 1} of ${computed.length}</span>
+          <span class="hero-eta">${currentStop.arrivalFormatted} – ${currentStop.departureFormatted}</span>
+        </div>
+        <div class="hero-family">${escapeHtml(currentStop.family_name)}</div>
+        <div class="hero-address" onclick="copyText('${escapeJs(currentStop.address)}', 'Address copied!')">📍 ${escapeHtml(currentStop.address)}</div>
+        ${currentStop.notes ? `<div class="hero-notes">${escapeHtml(currentStop.notes)}</div>` : ""}
+        ${callHtml ? `<div style="margin-bottom: 9px;">${callHtml}</div>` : ""}
+        <div class="hero-actions">
+          <a class="btn-car btn-go-primary" href="${navUrl}" target="_blank" rel="noopener">${isWalk ? "🚶 Walk" : "🧭 Navigate"}</a>
+          <button id="hero-timer-btn" class="btn-car btn-timer-hero" onclick="toggleHouseTimer('${currentStop.id}', ${currentStop.duration})">⏱️ ${currentStop.duration}m Timer</button>
+          <button class="btn-car btn-checkin-hero" onclick="toggleVisited('${currentStop.id}')">✓ Arrived</button>
+        </div>
+        ${upNextHtml}
+      </section>
+    `;
+    updateTimerButtonUI(currentStop.duration);
+  } else {
+    heroEl.innerHTML = `
+      <section class="hero-card" style="border-color: var(--accent-mint);">
+        <div class="hero-family" style="color: var(--accent-mint);">🎉 ${escapeHtml(activeDay.label)} Complete!</div>
+        <div class="hero-address">Merry Christmas to everyone in ${escapeHtml(CFG.WARDS[activeWardId].full)}!</div>
+      </section>
+    `;
+  }
+
+  // Search filter
+  const matches = (s) =>
+    !searchQuery ||
+    s.family_name.toLowerCase().includes(searchQuery) ||
+    s.address.toLowerCase().includes(searchQuery) ||
+    (s.notes || "").toLowerCase().includes(searchQuery);
+
+  const fCompleted = completedStops.filter(matches);
+  const fUpcoming = upcomingStops.filter(matches);
+
+  document.getElementById("completed-section").innerHTML = fCompleted.length
+    ? `<div class="section-heading">Completed (${fCompleted.length})</div>` +
+      fCompleted
+        .map(
+          (s) => `
+          <div class="stop-card visited-collapsed" id="card-${s.id}">
+            <div class="collapsed-info">
+              <span class="collapsed-check">✓</span>
+              <span class="collapsed-title">#${s.index + 1} ${escapeHtml(s.family_name)}</span>
+            </div>
+            <button class="collapsed-undo" onclick="toggleVisited('${s.id}')">Undo</button>
+          </div>
+        `
+        )
+        .join("")
+    : "";
+
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  document.getElementById("upcoming-section").innerHTML = fUpcoming.length
+    ? `<div class="section-heading">${searchQuery ? "Matching Houses" : "Remaining Stops"} (${fUpcoming.length})</div>` +
+      fUpcoming
+        .map((s) => {
+          const isCur = currentStop && s.id === currentStop.id;
+          const navUrl = getNavUrl(s.address, s.lat, s.lng);
+          const isWalk = (s.distance_label || "").toLowerCase().includes("walk");
+          const connector =
+            s.index === 0 || searchQuery
+              ? ""
+              : `<div class="drive-connector ${isWalk ? "walk-leg" : ""}">
+                  <span class="drive-pill">${isWalk ? "🚶" : "🚗"} ${s.driveFromPrev} min ${s.distance_label ? `(${escapeHtml(s.distance_label)})` : ""}</span>
+                  <span>Arrive ${s.arrivalFormatted}</span>
+                </div>`;
+          const roleBadge =
+            s.stop_role === "START"
+              ? `<span class="role-badge start">START</span>`
+              : s.stop_role === "END"
+              ? `<span class="role-badge end">🍽️ END</span>`
+              : "";
+          const distBadge = s.distFromUser !== null ? `<span class="role-badge start">${s.distFromUser.toFixed(1)} mi</span>` : "";
+
+          return `
+            ${connector}
+            <article class="stop-card ${isCur ? "active-next" : ""} ${s.stop_role === "END" ? "final-dinner" : ""}" id="card-${s.id}">
+              <div class="card-top">
+                <div class="seq-and-time">
+                  <span class="seq-badge">#${s.index + 1}</span>
+                  <span class="time-window">${s.arrivalFormatted} – ${s.departureFormatted}</span>
+                  ${roleBadge}
+                  ${distBadge}
+                </div>
+                ${
+                  isAdmin && !searchQuery && s.stop_role !== "START" && s.stop_role !== "END"
+                    ? `<div class="reorder-controls">
+                        <button class="move-btn" onclick="moveHouseInActiveDay(${s.index}, -1)">▲</button>
+                        <button class="move-btn" onclick="moveHouseInActiveDay(${s.index}, 1)">▼</button>
+                      </div>`
+                    : ""
+                }
+              </div>
+              <div class="family-name">${escapeHtml(s.family_name)}</div>
+              <div class="address-line" onclick="copyText('${escapeJs(s.address)}', 'Address copied!')">📍 ${escapeHtml(s.address)}</div>
+              ${s.notes ? `<div class="notes-line">${escapeHtml(s.notes)}</div>` : ""}
+              <div class="card-actions">
+                <a class="nav-btn gmaps" href="${navUrl}" target="_blank" rel="noopener">${isWalk ? "🚶 Walk" : "🧭 Navigate"}</a>
+                <button class="nav-btn headsup" onclick="sendHostHeadsUp('${escapeJs(s.family_name)}', '${escapeJs(s.arrivalFormatted)}')">📲 Heads-Up</button>
+                <button class="checkin-btn" onclick="toggleVisited('${s.id}')">✓ Check In</button>
+              </div>
+            </article>
+          `;
+        })
+        .join("")
+    : "";
+
+  // Coordinator Footer
+  const callBtn = document.getElementById("footer-call-btn");
+  const smsBtn = document.getElementById("footer-sms-btn");
+  if (settings.coordinator_phone) {
+    const digits = settings.coordinator_phone.replace(/[^\d+]/g, "");
+    callBtn.href = `tel:${digits}`;
+    callBtn.textContent = `📞 Call ${settings.coordinator_name || "Coordinator"}`;
+    callBtn.style.display = "inline-block";
+    smsBtn.href = `sms:${digits}`;
+    smsBtn.textContent = `💬 Text ${settings.coordinator_name || "Coordinator"}`;
+    smsBtn.style.display = "inline-block";
+  } else {
+    callBtn.style.display = "none";
+    smsBtn.style.display = "none";
+  }
+}
+
+// ---------- Live Actions (Check-In, Shift to Now, WhatsApp ETA, Unplanned House) ----------
+
+async function toggleVisited(houseId) {
+  if (!wardPayload) return;
+  const house = wardPayload.ward_houses.find((h) => h.id === houseId);
+  if (!house) return;
+  const nextVisited = !house.visited;
+  const nowIso = new Date().toISOString();
+
+  // Optimistic local update
+  house.visited = nextVisited;
+  house.checked_in_at = nextVisited ? nowIso : null;
+  localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
+  render();
+  showToast(nextVisited ? `✓ Checked in: ${house.family_name}` : `Undid: ${house.family_name}`);
+
+  // If Ward Admin is unlocked & online, persist to Supabase & broadcast PII-free Realtime update
+  if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+    const { data } = await sbClient.rpc("admin_checkin_house", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_house_id: houseId,
+      p_visited: nextVisited,
+      p_actual_timestamp: nowIso
+    });
+    if (data && data.ok) {
+      broadcastPiiFreeEtaShift(data.carol_day_id, data.current_stop_index, nowIso);
+    }
+  }
+}
+
+function shiftScheduleToNow() {
+  const days = getDays();
+  const activeDay = days.find((d) => d.id === activeDayId);
+  if (!activeDay) return;
+  const houses = getDayHouses(activeDay.id);
+  const nextIdx = houses.findIndex((h) => !h.visited);
+  if (nextIdx === -1) return showToast("All stops completed!");
+
+  const now = new Date();
+  const nowMins = now.getHours() * 60 + now.getMinutes();
+  let elapsed = 0;
+  for (let i = 0; i < nextIdx; i++) {
+    if (i > 0) elapsed += Number(houses[i].drive_mins) || 0;
+    elapsed += Number(houses[i].visit_mins) || activeDay.avg_visit_mins || 20;
+  }
+  if (nextIdx > 0) elapsed += Number(houses[nextIdx].drive_mins) || 0;
+
+  const adjusted = (((nowMins - elapsed) % 1440) + 1440) % 1440;
+  activeDay.start_time = `${String(Math.floor(adjusted / 60)).padStart(2, "0")}:${String(adjusted % 60).padStart(2, "0")}`;
+  localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
+  render();
+  showToast(`Shifted live schedule to ${minutesToTimeStr(nowMins)}`);
+}
+
+function shareWhatsAppStatus() {
+  const days = getDays();
+  const activeDay = days.find((d) => d.id === activeDayId);
+  if (!activeDay) return;
+  const { computed } = calculateSchedule(activeDay, getDayHouses(activeDay.id));
+  const done = computed.filter((s) => s.visited);
+  const next = computed.find((s) => !s.visited);
+  const finalStop = computed[computed.length - 1];
+  const dayShort = `Day ${activeDay.day_number || 1}`;
+
+  let msg = `🎄 Carol ${dayShort} - Update\n`;
+  if (done.length > 0) {
+    const lastDone = done[done.length - 1];
+    msg += `✅ Completed: #${lastDone.index + 1} ${lastDone.family_name} (${done.length}/${computed.length})\n`;
+  }
+  if (next) {
+    msg += `🚗 Next Stop: #${next.index + 1} ${next.family_name} (ETA ${next.arrivalFormatted})\n`;
+    msg += `📍 ${next.address}\n`;
+  } else {
+    msg += `🎉 All houses completed!\n`;
+  }
+  if (finalStop) {
+    msg += `🍽️ Final Stop ETA (${finalStop.family_name}): ${finalStop.arrivalFormatted}`;
+  }
+
+  copyText(msg, `Copied! Select "${(wardPayload.ward_settings && wardPayload.ward_settings.whatsapp_group_name) || CFG.WARDS[activeWardId].defaultWaGroup}" in WhatsApp`);
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
-function currentDayMeta() {
-  return window.CAROL_DATA.days[state.activeDay];
+function sendHostHeadsUp(family, etaStr) {
+  const wShort = CFG.WARDS[activeWardId].short;
+  const msg = `🎄 Hi ${family}! ${wShort} Carol is on the way — our current ETA to your home is ${etaStr}. See you soon! 🎶`;
+  copyText(msg, `Heads-up copied for ${family}!`);
+  window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
-function currentDayState() {
-  return state.days[state.activeDay];
+// ---------- Add Unplanned New House (Shortest Detour + Optional Supabase Sync) ----------
+
+function openAddHouseModal() {
+  document.getElementById("add-family").value = "";
+  document.getElementById("add-address").value = "";
+  document.getElementById("add-phone").value = "";
+  document.getElementById("add-notes").value = "";
+  document.getElementById("add-placement").value = "auto";
+  document.getElementById("add-house-status").textContent = "Smart mode finds the shortest detour among remaining unvisited houses.";
+  document.getElementById("add-house-modal").classList.add("open");
 }
 
-// ---------- Day Switching ----------
+async function submitNewHouse() {
+  const family_name = document.getElementById("add-family").value.trim();
+  const address = document.getElementById("add-address").value.trim();
+  const phone = document.getElementById("add-phone").value.trim();
+  const notes = document.getElementById("add-notes").value.trim();
+  const placement = document.getElementById("add-placement").value;
+  const visit_mins = Math.max(5, parseInt(document.getElementById("add-visit-mins").value, 10) || 20);
+  const statusEl = document.getElementById("add-house-status");
+  const btn = document.getElementById("btn-add-house-submit");
 
-function switchDay(dayKey) {
-  if (!state.days[dayKey]) return;
-  state.activeDay = dayKey;
-  searchQuery = "";
-  const searchEl = document.getElementById("search-input");
-  if (searchEl) searchEl.value = "";
-  document.getElementById("search-clear").classList.remove("visible");
-  saveState();
+  if (!family_name || !address) {
+    statusEl.textContent = "Enter both Family Name and Street Address.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Calculating...";
+  statusEl.textContent = "Geocoding address & finding shortest detour...";
+
+  const dayHouses = getDayHouses(activeDayId);
+  const coords = await window.CarolOptimizer.geocodeAddress(address);
+
+  let insertIdx = dayHouses.length;
+  let detourInfo = "";
+  const firstUnvisited = dayHouses.findIndex((h) => !h.visited);
+  const hasEnd = dayHouses.length > 0 && dayHouses[dayHouses.length - 1].stop_role === "END";
+  const maxSlot = hasEnd ? dayHouses.length - 1 : dayHouses.length;
+
+  if (placement === "next") {
+    insertIdx = firstUnvisited === -1 ? maxSlot : firstUnvisited;
+  } else if (placement === "before-end") {
+    insertIdx = maxSlot;
+  } else {
+    const res = window.CarolOptimizer.findBestInsertionSlot(dayHouses, coords);
+    insertIdx = res.insertIdx;
+    if (coords) detourInfo = ` (~+${Math.max(0.1, res.addedMiles * 1.25).toFixed(1)} mi detour)`;
+  }
+
+  let drive_mins = insertIdx === 0 ? 0 : 6;
+  let distance_label = insertIdx === 0 ? "Start" : "Est. 6 min drive";
+  const prev = insertIdx > 0 ? dayHouses[insertIdx - 1] : null;
+  const next = insertIdx < dayHouses.length ? dayHouses[insertIdx] : null;
+
+  if (coords && prev && typeof prev.lat === "number") {
+    const legIn = await window.CarolOptimizer.fetchOsrmLeg({ lat: prev.lat, lng: prev.lng }, coords);
+    drive_mins = legIn.drive_mins;
+    distance_label = legIn.distance_label;
+  }
+  if (coords && next && typeof next.lat === "number") {
+    const legOut = await window.CarolOptimizer.fetchOsrmLeg(coords, { lat: next.lat, lng: next.lng });
+    next.drive_mins = legOut.drive_mins;
+    next.distance_label = legOut.distance_label;
+  }
+
+  const newHouse = {
+    id: `local-${Date.now()}`,
+    ward_id: activeWardId,
+    season_id: wardPayload.active_season ? wardPayload.active_season.id : null,
+    carol_day_id: activeDayId,
+    family_name,
+    address,
+    lat: coords ? coords.lat : null,
+    lng: coords ? coords.lng : null,
+    phone,
+    notes: notes ? `✨ Added live • ${notes}` : "✨ Unplanned house added during carol",
+    stop_role: null,
+    stop_order: insertIdx,
+    drive_mins,
+    distance_label,
+    visit_mins,
+    visited: false,
+    checked_in_at: null
+  };
+
+  dayHouses.splice(insertIdx, 0, newHouse);
+  dayHouses.forEach((h, i) => (h.stop_order = i));
+
+  // Merge back into wardPayload
+  wardPayload.ward_houses = wardPayload.ward_houses
+    .filter((h) => h.carol_day_id !== activeDayId)
+    .concat(dayHouses);
+  localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
+
+  // Sync to Supabase if Admin is unlocked
+  if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient && wardPayload.active_season) {
+    await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: activeDayId,
+      p_houses: dayHouses,
+      p_replace_day: true
+    });
+    broadcastPiiFreeEtaShift(activeDayId, insertIdx, new Date().toISOString());
+    await syncActiveWardOnline(true);
+  }
+
+  btn.disabled = false;
+  btn.textContent = "Find Best Spot & Add";
+  closeModal("add-house-modal");
   render();
-  showToast(`Switched to ${window.CAROL_DATA.days[dayKey].shortLabel} (${window.CAROL_DATA.days[dayKey].dateLabel})`);
+  showToast(`Added ${family_name} at Stop #${insertIdx + 1}${detourInfo}`);
 }
 
-// ---------- UI Toggles ----------
+// ---------- Songbook Integration ----------
+
+function getCombinedSongs() {
+  const dbSongs = (wardPayload && wardPayload.ward_songs) || [];
+  let localSongs = [];
+  try {
+    localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
+  } catch (e) {}
+  return [...CFG.DEFAULT_SONGS, ...dbSongs, ...localSongs];
+}
+
+function renderCurrentSongbook() {
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  window.CarolSongbook.render(getCombinedSongs(), isAdmin);
+}
+
+function openSongbookModal() {
+  acquireWakeLockIfEnabled();
+  renderCurrentSongbook();
+  document.getElementById("songbook-modal").classList.add("open");
+}
+
+function closeSongbookModal() {
+  window.CarolSongbook.stopAudio();
+  closeModal("songbook-modal");
+}
+
+function toggleAddSongPanel() {
+  document.getElementById("add-song-panel").classList.toggle("open");
+}
+
+async function fetchLyricsFromUrl() {
+  const urlInput = document.getElementById("new-song-url");
+  const statusEl = document.getElementById("fetch-lyrics-status");
+  const btn = document.getElementById("btn-fetch-lyrics");
+  let url = (urlInput.value || "").trim();
+  if (!url) {
+    statusEl.textContent = "Please paste a lyrics webpage URL first.";
+    return;
+  }
+  if (!/^https?:\/\//i.test(url)) {
+    url = "https://" + url;
+    urlInput.value = url;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Fetching...";
+  statusEl.textContent = "Extracting title, lyrics & checking for karaoke audio track...";
+
+  try {
+    const res = await window.CarolSongbook.fetchFromUrl(url);
+    if (res.title) document.getElementById("new-song-title").value = res.title;
+    if (res.karaoke_audio_url) document.getElementById("new-song-audio").value = res.karaoke_audio_url;
+    document.getElementById("new-song-lyrics").value = res.lyrics;
+    statusEl.textContent = res.karaoke_audio_url
+      ? "✓ Lyrics + Karaoke Audio Track detected! Review & tap Save."
+      : "✓ Lyrics imported! Review & tap Save to Songbook.";
+  } catch (e) {
+    statusEl.textContent = "Could not fetch URL automatically — paste lyrics directly below.";
+  } finally {
+    btn.disabled = false;
+    btn.textContent = "Fetch";
+  }
+}
+
+async function saveNewSong() {
+  const title = document.getElementById("new-song-title").value.trim();
+  const lyrics = document.getElementById("new-song-lyrics").value.trim();
+  const karaoke_audio_url = document.getElementById("new-song-audio").value.trim();
+  const source_url = document.getElementById("new-song-url").value.trim();
+  if (!title || !lyrics) return showToast("Enter both title and lyrics");
+
+  if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+    const { data } = await sbClient.rpc("admin_save_song", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_song: { title, lang: "Custom", lyrics, karaoke_audio_url, source_url }
+    });
+    if (data && data.ok) {
+      await syncActiveWardOnline(true);
+    }
+  } else {
+    const localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
+    localSongs.push({ id: `local-song-${Date.now()}`, title, lang: "Custom", lyrics, karaoke_audio_url, source_url, localOnly: true });
+    localStorage.setItem(keyLocalSongs(activeWardId), JSON.stringify(localSongs));
+  }
+
+  document.getElementById("new-song-url").value = "";
+  document.getElementById("new-song-title").value = "";
+  document.getElementById("new-song-audio").value = "";
+  document.getElementById("new-song-lyrics").value = "";
+  document.getElementById("add-song-panel").classList.remove("open");
+  const all = getCombinedSongs();
+  window.CarolSongbook.setActiveIdx(all.length - 1);
+  renderCurrentSongbook();
+  showToast(`Saved "${title}" to Songbook!`);
+}
+
+async function deleteCurrentSong() {
+  const songs = getCombinedSongs();
+  const cur = songs[window.CarolSongbook.getActiveIdx()];
+  if (!cur || String(cur.id).startsWith("builtin-")) return;
+
+  if (cur.localOnly) {
+    const localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]").filter((s) => s.id !== cur.id);
+    localStorage.setItem(keyLocalSongs(activeWardId), JSON.stringify(localSongs));
+  } else if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+    await sbClient.rpc("admin_delete_song", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_song_id: cur.id
+    });
+    await syncActiveWardOnline(true);
+  }
+  window.CarolSongbook.setActiveIdx(0);
+  renderCurrentSongbook();
+  showToast(`Deleted "${cur.title}"`);
+}
+
+// ---------- Ward Admin Portal (4 Tabs) ----------
+
+function openAdminModal() {
+  document.getElementById("admin-gate-ward-name").textContent = CFG.WARDS[activeWardId].full;
+  document.getElementById("admin-modal-title").textContent = `🔐 Admin • ${CFG.WARDS[activeWardId].short}`;
+  const isUnlocked = adminSession.unlocked && adminSession.wardId === activeWardId;
+  document.getElementById("admin-login-gate").style.display = isUnlocked ? "none" : "block";
+  document.getElementById("admin-portal-body").style.display = isUnlocked ? "block" : "none";
+  document.getElementById("admin-login-error").textContent = "";
+  if (isUnlocked) populateAdminControls();
+  document.getElementById("admin-modal").classList.add("open");
+}
+
+async function handleAdminVerify() {
+  const code = document.getElementById("admin-code-input").value.trim();
+  const errEl = document.getElementById("admin-login-error");
+  if (!code) return (errEl.textContent = "Enter Admin Code.");
+  if (!initSupabaseClient()) return (errEl.textContent = "Connect Supabase in ⚙️ Settings first.");
+
+  const { data, error } = await sbClient.rpc("verify_ward_admin_code", {
+    p_ward_id: activeWardId,
+    p_admin_code: code
+  });
+  if (error || !data || !data.ok) {
+    errEl.textContent = data && data.error === "RATE_LIMITED" ? "Rate limited. Wait 15 mins." : "Invalid Admin Code for this ward.";
+    return;
+  }
+
+  adminSession = { unlocked: true, code, role: data.role, wardId: activeWardId };
+  document.getElementById("admin-code-input").value = "";
+  document.getElementById("admin-login-gate").style.display = "none";
+  document.getElementById("admin-portal-body").style.display = "block";
+  applyUiPrefs();
+  populateAdminControls();
+  render();
+  showToast(`Admin unlocked (${data.role}) for ${CFG.WARDS[activeWardId].short}`);
+}
+
+function switchAdminTab(tabName, btnEl) {
+  document.querySelectorAll(".admin-tab").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll(".admin-pane").forEach((p) => p.classList.remove("active"));
+  if (btnEl) btnEl.classList.add("active");
+  const pane = document.getElementById(`admin-pane-${tabName}`);
+  if (pane) pane.classList.add("active");
+  if (tabName === "optimizer") renderOptimizerList();
+}
+
+function populateAdminControls() {
+  const days = getDays();
+  const dayOpts = days.length
+    ? days.map((d) => `<option value="${escapeHtml(d.label)}" data-id="${d.id}">${escapeHtml(d.label)}</option>`).join("")
+    : `<option value="Day 1">Day 1</option>`;
+  document.getElementById("imp-default-day").innerHTML = dayOpts;
+  document.getElementById("opt-day-select").innerHTML = days.map((d) => `<option value="${d.id}">${escapeHtml(d.label)}</option>`).join("");
+
+  const s = (wardPayload && wardPayload.ward_settings) || {};
+  document.getElementById("adm-visit-mins").value = s.default_visit_mins || 20;
+  document.getElementById("adm-drive-buffer").value = s.drive_buffer_mins || 5;
+  document.getElementById("adm-coord-name").value = s.coordinator_name || "";
+  document.getElementById("adm-coord-phone").value = s.coordinator_phone || "";
+  document.getElementById("adm-meeting-point").value = s.meeting_point || "";
+  document.getElementById("adm-banner").value = s.instructions_banner || "";
+}
+
+async function promptAddNewDay() {
+  const days = getDays();
+  const nextNum = days.length + 1;
+  const label = window.prompt(`Label for Day ${nextNum}:`, `Day ${nextNum}`);
+  if (!label) return;
+  const dateStr = window.prompt("Carol Date (YYYY-MM-DD, optional):", "") || null;
+  const startTime = window.prompt("Start Time (HH:MM 24h):", "14:00") || "14:00";
+
+  if (!wardPayload || !wardPayload.active_season) return showToast("Create an active season first");
+  const { data } = await sbClient.rpc("admin_upsert_carol_day", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_season_id: wardPayload.active_season.id,
+    p_day_id: null,
+    p_day_number: nextNum,
+    p_label: label,
+    p_carol_date: dateStr,
+    p_start_time: startTime,
+    p_avg_visit_mins: 20,
+    p_drive_buffer_mins: 5
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Added ${label}`);
+  }
+}
+
+function previewBulkImport() {
+  const raw = document.getElementById("imp-textarea").value;
+  const defaultDay = document.getElementById("imp-default-day").value || "Day 1";
+  const parsed = window.CarolOptimizer.parseBulkDelimited(raw, defaultDay);
+  parsedImportRows = parsed.rows;
+  const wrap = document.getElementById("imp-preview-wrap");
+  const status = document.getElementById("imp-status");
+  const saveBtn = document.getElementById("btn-geocode-save-import");
+
+  if (!parsedImportRows.length) {
+    wrap.style.display = "none";
+    saveBtn.disabled = true;
+    status.textContent = "No valid rows found. Tap ? for sample format.";
+    return;
+  }
+
+  status.textContent = `Detected "${parsed.delimiter === "\t" ? "TAB" : parsed.delimiter}" delimiter • ${parsedImportRows.length} families ready to review & geocode.`;
+  saveBtn.disabled = false;
+  wrap.style.display = "block";
+  wrap.innerHTML = `
+    <table class="preview-table">
+      <thead><tr><th>Day</th><th>Family</th><th>Address</th><th>Role</th><th>Notes</th></tr></thead>
+      <tbody>
+        ${parsedImportRows
+          .map(
+            (r, i) => `
+          <tr>
+            <td><input value="${escapeHtml(r.day_label)}" onchange="parsedImportRows[${i}].day_label=this.value" style="min-width:74px;" /></td>
+            <td><input value="${escapeHtml(r.family_name)}" onchange="parsedImportRows[${i}].family_name=this.value" style="min-width:120px;" /></td>
+            <td><input value="${escapeHtml(r.address)}" onchange="parsedImportRows[${i}].address=this.value" style="min-width:170px;" /></td>
+            <td>
+              <select onchange="parsedImportRows[${i}].stop_role=this.value||null">
+                <option value="" ${!r.stop_role ? "selected" : ""}>—</option>
+                <option value="START" ${r.stop_role === "START" ? "selected" : ""}>START</option>
+                <option value="END" ${r.stop_role === "END" ? "selected" : ""}>END</option>
+              </select>
+            </td>
+            <td><input value="${escapeHtml(r.notes)}" onchange="parsedImportRows[${i}].notes=this.value" style="min-width:110px;" /></td>
+          </tr>
+        `
+          )
+          .join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+async function geocodeAndSaveImport() {
+  if (!parsedImportRows.length || !wardPayload || !wardPayload.active_season) return;
+  const status = document.getElementById("imp-status");
+  const btn = document.getElementById("btn-geocode-save-import");
+  const replaceDay = document.getElementById("imp-replace-day").checked;
+  btn.disabled = true;
+
+  // Group rows by day_label
+  const byDay = {};
+  for (let i = 0; i < parsedImportRows.length; i++) {
+    const r = parsedImportRows[i];
+    status.textContent = `Geocoding ${i + 1} / ${parsedImportRows.length}: ${r.family_name}...`;
+    if (r.lat === null || r.lng === null) {
+      const c = await window.CarolOptimizer.geocodeAddress(r.address);
+      if (c) {
+        r.lat = c.lat;
+        r.lng = c.lng;
+      }
+      await new Promise((res) => setTimeout(res, 1050)); // polite Nominatim throttle
+    }
+    if (!byDay[r.day_label]) byDay[r.day_label] = [];
+    byDay[r.day_label].push(r);
+  }
+
+  // Ensure each day exists in carol_days and save houses
+  let existingDays = getDays();
+  for (const [dayLabel, rows] of Object.entries(byDay)) {
+    let dayObj = existingDays.find((d) => d.label.toLowerCase().startsWith(dayLabel.toLowerCase()));
+    if (!dayObj) {
+      const dayNum = parseInt((dayLabel.match(/\d+/) || [existingDays.length + 1])[0], 10);
+      const { data: dRes } = await sbClient.rpc("admin_upsert_carol_day", {
+        p_ward_id: activeWardId,
+        p_admin_code: adminSession.code,
+        p_season_id: wardPayload.active_season.id,
+        p_day_id: null,
+        p_day_number: dayNum,
+        p_label: dayLabel,
+        p_carol_date: null,
+        p_start_time: "14:00",
+        p_avg_visit_mins: 20,
+        p_drive_buffer_mins: 5
+      });
+      dayObj = { id: dRes.day_id, label: dayLabel };
+      existingDays.push(dayObj);
+    }
+
+    const withLegs = window.CarolOptimizer.recomputeLegEstimates(rows);
+    await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: dayObj.id,
+      p_houses: withLegs,
+      p_replace_day: replaceDay
+    });
+  }
+
+  await syncActiveWardOnline(true);
+  btn.disabled = false;
+  status.textContent = `✓ Saved ${parsedImportRows.length} families across ${Object.keys(byDay).length} carol day(s)!`;
+  showToast("Bulk import & geocoding complete!");
+}
+
+function renderOptimizerList() {
+  const dayId = document.getElementById("opt-day-select").value;
+  optimizerDraft = getDayHouses(dayId).map((h) => ({ ...h }));
+  drawOptimizerDraft();
+}
+
+function drawOptimizerDraft() {
+  const el = document.getElementById("opt-list");
+  if (!optimizerDraft.length) {
+    el.innerHTML = `<p class="helper-text">No houses in this day yet.</p>`;
+    return;
+  }
+  el.innerHTML = optimizerDraft
+    .map(
+      (h, i) => `
+      <div class="stop-card visited-collapsed" style="opacity:1; margin-bottom:6px;">
+        <div class="collapsed-info">
+          <span class="seq-badge">#${i + 1}</span>
+          <span class="collapsed-title" style="color:var(--text-primary);">${escapeHtml(h.family_name)} ${h.stop_role ? `[${h.stop_role}]` : ""}</span>
+        </div>
+        <div class="reorder-controls">
+          <button class="move-btn" onclick="moveOptDraft(${i}, -1)" ${i === 0 ? "disabled" : ""}>▲</button>
+          <button class="move-btn" onclick="moveOptDraft(${i}, 1)" ${i === optimizerDraft.length - 1 ? "disabled" : ""}>▼</button>
+        </div>
+      </div>
+    `
+    )
+    .join("");
+}
+
+function moveOptDraft(idx, delta) {
+  const target = idx + delta;
+  if (target < 0 || target >= optimizerDraft.length) return;
+  [optimizerDraft[idx], optimizerDraft[target]] = [optimizerDraft[target], optimizerDraft[idx]];
+  optimizerDraft = window.CarolOptimizer.recomputeLegEstimates(optimizerDraft);
+  drawOptimizerDraft();
+}
+
+function runConstrainedOptimizer() {
+  optimizerDraft = window.CarolOptimizer.optimizeDayHouses(optimizerDraft);
+  drawOptimizerDraft();
+  showToast("Optimized route with START/END pinned!");
+}
+
+async function saveOptimizedOrder() {
+  const dayId = document.getElementById("opt-day-select").value;
+  if (!dayId || !optimizerDraft.length) return;
+  const { data } = await sbClient.rpc("admin_save_house_order", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_carol_day_id: dayId,
+    p_ordered_houses: optimizerDraft
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    broadcastPiiFreeEtaShift(dayId, 0, new Date().toISOString());
+    showToast("Saved locked route sequence!");
+  }
+}
+
+async function moveHouseInActiveDay(index, delta) {
+  const houses = getDayHouses(activeDayId);
+  const target = index + delta;
+  if (target < 0 || target >= houses.length) return;
+  if (houses[target].stop_role === "START" || houses[target].stop_role === "END") return;
+  [houses[index], houses[target]] = [houses[target], houses[index]];
+  const updated = window.CarolOptimizer.recomputeLegEstimates(houses);
+  await sbClient.rpc("admin_save_house_order", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_carol_day_id: activeDayId,
+    p_ordered_houses: updated
+  });
+  await syncActiveWardOnline(true);
+}
+
+// ---------- Seasons, Settings & Security RPCs ----------
+
+async function createNewSeason() {
+  const yr = parseInt(document.getElementById("adm-new-year").value, 10);
+  if (!yr) return;
+  const { data } = await sbClient.rpc("admin_upsert_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_year: yr,
+    p_name: `Christmas Carol ${yr}`,
+    p_activate: true
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Activated ${yr} season!`);
+  }
+}
+
+async function clonePreviousYear() {
+  const fromYr = wardPayload && wardPayload.active_season ? wardPayload.active_season.year : 2026;
+  const toYr = parseInt(document.getElementById("adm-new-year").value, 10) || fromYr + 1;
+  if (toYr === fromYr) return showToast("Pick a different target year (e.g., 2027)");
+
+  const { data } = await sbClient.rpc("admin_clone_previous_season", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_from_year: fromYr,
+    p_to_year: toYr
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    populateAdminControls();
+    showToast(`Cloned ${data.copied_houses} families into ${toYr}!`);
+  } else {
+    showToast(`Clone failed: ${data ? data.error : "Error"}`);
+  }
+}
+
+async function saveAdminWardSettings() {
+  const { data } = await sbClient.rpc("admin_save_ward_settings", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_settings: {
+      default_visit_mins: parseInt(document.getElementById("adm-visit-mins").value, 10) || 20,
+      drive_buffer_mins: parseInt(document.getElementById("adm-drive-buffer").value, 10) || 5,
+      coordinator_name: document.getElementById("adm-coord-name").value.trim(),
+      coordinator_phone: document.getElementById("adm-coord-phone").value.trim(),
+      meeting_point: document.getElementById("adm-meeting-point").value.trim(),
+      instructions_banner: document.getElementById("adm-banner").value.trim()
+    }
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    showToast("Ward settings saved!");
+  }
+}
+
+function generateRandomPin() {
+  const pin = String(Math.floor(1000 + Math.random() * 9000));
+  document.getElementById("sec-new-user-code").value = pin;
+}
+
+async function resetWardUserCode() {
+  const newCode = document.getElementById("sec-new-user-code").value.trim();
+  if (newCode.length < 4) return showToast("Code must be at least 4 characters");
+  const { data } = await sbClient.rpc("reset_ward_user_code", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_new_code: newCode
+  });
+  if (data && data.ok) {
+    localStorage.setItem(keyUserCode(activeWardId), newCode);
+    showToast(`Ward User Code reset (v${data.user_code_version})! Old devices revoked.`);
+  } else {
+    showToast(`Reset failed: ${data ? data.error : "Error"}`);
+  }
+}
+
+function copyWhatsAppWardInvite() {
+  const code = document.getElementById("sec-new-user-code").value.trim() || localStorage.getItem(keyUserCode(activeWardId)) || "[CODE]";
+  const w = CFG.WARDS[activeWardId];
+  const link = `${CFG.publicBaseUrl}?ward=${activeWardId}`;
+  const msg = `🎄 *${w.full} — Christmas Carol App*\n⛪ ${CFG.churchName}\n\n📲 Open App: ${link}\n🔑 Ward Access Code: *${code}*\n\n(Enter once on your phone & tap Add to Home Screen for live ETAs, Navigation & Songbook!)`;
+  copyText(msg, "WhatsApp Invite copied!");
+}
+
+async function rotateWardAdminCode() {
+  const newCode = document.getElementById("sec-new-admin-code").value.trim();
+  if (newCode.length < 6) return showToast("Admin code must be at least 6 characters");
+  const { data } = await sbClient.rpc("rotate_ward_admin_code", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_new_code: newCode
+  });
+  if (data && data.ok) {
+    adminSession.code = newCode;
+    document.getElementById("sec-new-admin-code").value = "";
+    showToast("Ward Admin Code rotated securely!");
+  } else {
+    showToast(`Failed: ${data ? data.error : "Error"}`);
+  }
+}
+
+// ---------- User Settings & Utilities ----------
+
+function openSettingsModal() {
+  const creds = window.getSupabaseCredentials();
+  document.getElementById("cfg-nav-app").value = prefs.primaryNavApp || "google";
+  document.getElementById("cfg-wakelock").value = prefs.autoWakeLock ? "on" : "off";
+  document.getElementById("cfg-sb-url").value = creds.url;
+  document.getElementById("cfg-sb-key").value = creds.anonKey;
+  document.getElementById("settings-modal").classList.add("open");
+}
+
+function saveUserSettings() {
+  prefs.primaryNavApp = document.getElementById("cfg-nav-app").value;
+  prefs.autoWakeLock = document.getElementById("cfg-wakelock").value === "on";
+  savePrefs();
+
+  const sbUrl = document.getElementById("cfg-sb-url").value.trim().replace(/\/+$/, "");
+  const sbKey = document.getElementById("cfg-sb-key").value.trim();
+  if (sbUrl) localStorage.setItem("carol_sb_url", sbUrl);
+  if (sbKey) localStorage.setItem("carol_sb_anon_key", sbKey);
+
+  if (prefs.autoWakeLock) acquireWakeLockIfEnabled();
+  else releaseWakeLock();
+
+  closeModal("settings-modal");
+  bootActiveWard();
+  showToast("Settings saved");
+}
+
+function openFormatHelpModal() {
+  document.getElementById("format-help-modal").classList.add("open");
+}
+
+function copySampleImportFormat() {
+  const sample = document.getElementById("sample-format-box").value;
+  document.getElementById("imp-textarea").value = sample;
+  copyText(sample, "Sample pasted into importer!");
+  closeModal("format-help-modal");
+}
 
 function toggleSnapshot() {
   snapshotOpen = !snapshotOpen;
   document.getElementById("snapshot-bar").classList.toggle("expanded", snapshotOpen);
-  document.getElementById("snapshot-toggle-btn").setAttribute("aria-expanded", String(snapshotOpen));
   document.getElementById("snapshot-chevron").textContent = snapshotOpen ? "Hide Map ▴" : "Show Map ▾";
-}
-
-function applyLargePrintClass() {
-  document.documentElement.classList.toggle("large-print", !!state.largePrint);
-  document.getElementById("btn-large-print").classList.toggle("active-toggle", !!state.largePrint);
-}
-
-function toggleLargePrint() {
-  state.largePrint = !state.largePrint;
-  applyLargePrintClass();
-  saveState();
-  showToast(state.largePrint ? "Large Print Driver Mode ON" : "Standard Print Size");
-}
-
-async function toggleWakeLock() {
-  const btn = document.getElementById("btn-wakelock");
-  if (!("wakeLock" in navigator)) {
-    showToast("Keep-Awake not supported in this browser");
-    return;
-  }
-  if (wakeLockSentinel) {
-    try {
-      await wakeLockSentinel.release();
-    } catch (e) {}
-    wakeLockSentinel = null;
-    btn.classList.remove("active-toggle");
-    showToast("Screen Keep-Awake OFF");
-  } else {
-    try {
-      wakeLockSentinel = await navigator.wakeLock.request("screen");
-      btn.classList.add("active-toggle");
-      showToast("Screen will stay awake while open ☀️");
-      wakeLockSentinel.addEventListener("release", () => {
-        wakeLockSentinel = null;
-        btn.classList.remove("active-toggle");
-      });
-    } catch (e) {
-      showToast("Could not enable Keep-Awake");
-    }
-  }
-}
-
-// ---------- GPS "Near Me" Helper ----------
-
-function haversineMiles(lat1, lng1, lat2, lng2) {
-  const R = 3958.8;
-  const toRad = (d) => (d * Math.PI) / 180;
-  const dLat = toRad(lat2 - lat1);
-  const dLng = toRad(lng2 - lng1);
-  const a =
-    Math.sin(dLat / 2) ** 2 +
-    Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) * Math.sin(dLng / 2) ** 2;
-  return 2 * R * Math.asin(Math.sqrt(a));
 }
 
 function toggleGpsTracking() {
@@ -319,14 +1645,9 @@ function toggleGpsTracking() {
     btn.classList.remove("gps-active");
     btn.textContent = "📍 Near Me";
     render();
-    showToast("Location distance OFF");
     return;
   }
-  if (!("geolocation" in navigator)) {
-    showToast("GPS not available on this device");
-    return;
-  }
-  btn.textContent = "📍 Locating...";
+  if (!("geolocation" in navigator)) return showToast("GPS not available");
   gpsWatchId = navigator.geolocation.watchPosition(
     (pos) => {
       userCoords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
@@ -334,1124 +1655,58 @@ function toggleGpsTracking() {
       btn.textContent = "📍 GPS ON";
       render();
     },
-    () => {
-      gpsWatchId = null;
-      userCoords = null;
-      btn.classList.remove("gps-active");
-      btn.textContent = "📍 Near Me";
-      showToast("Location permission denied");
-    },
-    { enableHighAccuracy: true, maximumAge: 15000, timeout: 12000 }
+    () => showToast("Location permission denied"),
+    { enableHighAccuracy: true, maximumAge: 15000 }
   );
 }
 
-// ---------- Schedule Calculation ----------
-
-function enforceFinalHostLock(daySt) {
-  const idx = daySt.stops.findIndex((s) => s.id === daySt.lockedFinalId);
-  if (idx !== -1 && idx !== daySt.stops.length - 1) {
-    const [locked] = daySt.stops.splice(idx, 1);
-    daySt.stops.push(locked);
-  } else if (idx === -1 && daySt.stops.length > 0) {
-    daySt.lockedFinalId = daySt.stops[daySt.stops.length - 1].id;
-  }
-}
-
-function timeStrToMinutes(hhmm) {
-  const [h, m] = (hhmm || "14:00").split(":").map(Number);
-  return h * 60 + (m || 0);
-}
-
-function minutesToTimeStr(totalMins) {
-  const wrapped = ((Math.round(totalMins) % 1440) + 1440) % 1440;
-  const h24 = Math.floor(wrapped / 60);
-  const m = wrapped % 60;
-  const period = h24 >= 12 ? "PM" : "AM";
-  const h12 = h24 % 12 === 0 ? 12 : h24 % 12;
-  return `${h12}:${String(m).padStart(2, "0")} ${period}`;
-}
-
-function calculateSchedule(daySt) {
-  enforceFinalHostLock(daySt);
-  let cursor = timeStrToMinutes(daySt.startTime);
-  let totalTravelMins = 0;
-  let totalCarolMins = 0;
-
-  const computed = daySt.stops.map((stop, index) => {
-    const driveFromPrev = index === 0 ? 0 : Number(stop.driveMins) || 0;
-    if (index > 0) {
-      cursor += driveFromPrev;
-      totalTravelMins += driveFromPrev;
-    }
-    const arrivalMins = cursor;
-    const duration = Number(stop.visitMins) || daySt.defaultVisitMins || 20;
-    const departureMins = arrivalMins + duration;
-    totalCarolMins += duration;
-    cursor = departureMins;
-
-    let distFromUser = null;
-    if (userCoords && typeof stop.lat === "number" && typeof stop.lng === "number") {
-      distFromUser = haversineMiles(userCoords.lat, userCoords.lng, stop.lat, stop.lng);
-    }
-
-    return {
-      ...stop,
-      index,
-      isLast: index === daySt.stops.length - 1,
-      driveFromPrev,
-      arrivalMins,
-      departureMins,
-      arrivalFormatted: minutesToTimeStr(arrivalMins),
-      departureFormatted: minutesToTimeStr(departureMins),
-      duration,
-      distFromUser
-    };
-  });
-
-  return { computed, totalTravelMins, totalCarolMins };
-}
-
-function getNavUrls(address, lat, lng) {
-  const encoded = encodeURIComponent(address);
-  const google = `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
-  const apple = `https://maps.apple.com/?daddr=${encoded}&dirflg=d`;
-  const waze =
-    typeof lat === "number" && typeof lng === "number"
-      ? `https://waze.com/ul?ll=${lat},${lng}&navigate=yes`
-      : `https://waze.com/ul?q=${encoded}&navigate=yes`;
-
-  if (state.primaryNavApp === "apple") {
-    return { primaryUrl: apple, primaryLabel: "Apple Maps", altUrl: google, altLabel: "Google" };
-  }
-  if (state.primaryNavApp === "waze") {
-    return { primaryUrl: waze, primaryLabel: "Waze", altUrl: google, altLabel: "Google" };
-  }
-  return { primaryUrl: google, primaryLabel: "Google Maps", altUrl: apple, altLabel: "Apple" };
-}
-
-function buildMultiStopGoogleMapsLinks(computed) {
-  if (computed.length < 2) return "";
-  // Google Maps supports up to ~9-10 stops reliably per URL; split into 2 legs
-  const splitIdx = Math.min(8, Math.ceil(computed.length / 2));
-  const leg1 = computed.slice(0, splitIdx + 1);
-  const leg2 = computed.slice(splitIdx);
-
-  const toUrl = (arr) =>
-    "https://www.google.com/maps/dir/" +
-    arr.map((s) => encodeURIComponent(s.address)).join("/");
-
-  return `
-    <a class="map-leg-btn" href="${toUrl(leg1)}" target="_blank" rel="noopener">
-      🗺️ Google Maps: #1–#${leg1[leg1.length - 1].index + 1}
-    </a>
-    <a class="map-leg-btn" href="${toUrl(leg2)}" target="_blank" rel="noopener">
-      🗺️ Google Maps: #${leg2[0].index + 1}–#${leg2[leg2.length - 1].index + 1}
-    </a>
-  `;
-}
-
-// ---------- Offline Interactive SVG Route Map ----------
-
-function renderOfflineRouteSvg(computed, nextIndex) {
-  const pts = computed.filter((s) => typeof s.lat === "number" && typeof s.lng === "number");
-  if (pts.length < 2) {
-    return `<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:0.82rem;">Custom route loaded — tap Google Maps links below for map view.</div>`;
-  }
-
-  const lats = pts.map((p) => p.lat);
-  const lngs = pts.map((p) => p.lng);
-  const minLat = Math.min(...lats);
-  const maxLat = Math.max(...lats);
-  const minLng = Math.min(...lngs);
-  const maxLng = Math.max(...lngs);
-
-  const cosLat = Math.cos(((minLat + maxLat) / 2) * (Math.PI / 180));
-  const W = 360;
-  const H = 200;
-  const pad = 26;
-
-  const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
-  const spanLat = Math.max(maxLat - minLat, 0.005);
-  const scale = Math.min((W - pad * 2) / spanLng, (H - pad * 2) / spanLat);
-
-  const usedW = spanLng * scale;
-  const usedH = spanLat * scale;
-  const offX = (W - usedW) / 2;
-  const offY = (H - usedH) / 2;
-
-  const project = (lat, lng) => ({
-    x: offX + (lng - minLng) * cosLat * scale,
-    y: H - (offY + (lat - minLat) * scale)
-  });
-
-  const projected = computed.map((s) =>
-    typeof s.lat === "number" && typeof s.lng === "number" ? project(s.lat, s.lng) : null
-  );
-
-  // Light collision repulsion so walkable-cluster pins remain legible
-  const validPts = projected.filter(Boolean);
-  for (let pass = 0; pass < 8; pass++) {
-    for (let i = 0; i < validPts.length; i++) {
-      for (let j = i + 1; j < validPts.length; j++) {
-        const dx = validPts[j].x - validPts[i].x;
-        const dy = validPts[j].y - validPts[i].y;
-        const dist = Math.hypot(dx, dy) || 0.01;
-        const minDist = 20;
-        if (dist < minDist) {
-          const push = (minDist - dist) / 2;
-          const ux = dx / dist;
-          const uy = dy / dist;
-          validPts[i].x = Math.max(14, Math.min(W - 14, validPts[i].x - ux * push));
-          validPts[i].y = Math.max(14, Math.min(H - 14, validPts[i].y - uy * push));
-          validPts[j].x = Math.max(14, Math.min(W - 14, validPts[j].x + ux * push));
-          validPts[j].y = Math.max(14, Math.min(H - 14, validPts[j].y + uy * push));
-        }
-      }
-    }
-  }
-
-  // Route segments
-  let linesSvg = "";
-  for (let i = 1; i < computed.length; i++) {
-    const p1 = projected[i - 1];
-    const p2 = projected[i];
-    if (!p1 || !p2) continue;
-    const isWalk = (computed[i].distance || "").toLowerCase().includes("walk");
-    const isDone = computed[i - 1].visited && computed[i].visited;
-    const stroke = isDone ? "#34d399" : isWalk ? "#c084fc" : "#475569";
-    const dash = isWalk ? 'stroke-dasharray="4 3"' : "";
-    linesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="${isDone ? 2.6 : 2}" ${dash} />`;
-  }
-
-  // Pins
-  let pinsSvg = "";
-  computed.forEach((s, idx) => {
-    const p = projected[idx];
-    if (!p) return;
-    const isCurrent = idx === nextIndex;
-    const fill = s.visited
-      ? "#065f46"
-      : isCurrent
-      ? "#fbbf24"
-      : s.isLast
-      ? "#991b1b"
-      : "#1b2028";
-    const stroke = s.visited
-      ? "#34d399"
-      : isCurrent
-      ? "#ffffff"
-      : s.isLast
-      ? "#f87171"
-      : "#94a3b8";
-    const textFill = isCurrent ? "#000000" : "#ffffff";
-    const r = isCurrent ? 11.5 : 9.5;
-
-    pinsSvg += `
-      <g style="cursor:pointer;" onclick="jumpToStop('${s.id}')">
-        ${isCurrent ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="16" fill="rgba(251,191,36,0.22)" />` : ""}
-        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${r}" fill="${fill}" stroke="${stroke}" stroke-width="1.8" />
-        <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${textFill}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
-      </g>
-    `;
-  });
-
-  return `
-    <svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:220px;" role="img" aria-label="Offline route map">
-      <text x="10" y="16" fill="#475569" font-size="9" font-weight="800" font-family="sans-serif">N ↑</text>
-      ${linesSvg}
-      ${pinsSvg}
-    </svg>
-  `;
-}
-
-function jumpToStop(stopId) {
-  const el = document.getElementById(`card-${stopId}`);
-  if (el) {
-    el.scrollIntoView({ behavior: "smooth", block: "center" });
-    el.classList.remove("highlight-pulse");
-    void el.offsetWidth;
-    el.classList.add("highlight-pulse");
-  } else {
-    showToast("That house is already checked in ✓");
-  }
-}
-
-// ---------- Search ----------
-
-function handleSearchInput(val) {
-  searchQuery = (val || "").trim().toLowerCase();
+function handleSearchInput(v) {
+  searchQuery = (v || "").trim().toLowerCase();
   document.getElementById("search-clear").classList.toggle("visible", searchQuery.length > 0);
   render();
 }
-
 function clearSearch() {
   searchQuery = "";
   document.getElementById("search-input").value = "";
   document.getElementById("search-clear").classList.remove("visible");
   render();
 }
-
-// ---------- Main Render ----------
-
-function render() {
-  applyLargePrintClass();
-  const meta = currentDayMeta();
-  const daySt = currentDayState();
-  const { computed, totalTravelMins, totalCarolMins } = calculateSchedule(daySt);
-
-  // Update Day Switcher Tabs
-  ["day1", "day2"].forEach((k) => {
-    const isAct = state.activeDay === k;
-    const tab = document.getElementById(`tab-${k}`);
-    tab.classList.toggle("active", isAct);
-    tab.setAttribute("aria-selected", String(isAct));
-    const st = state.days[k];
-    const doneCnt = st.stops.filter((s) => s.visited).length;
-    const sub = document.getElementById(`tab-${k}-sub`);
-    sub.textContent =
-      doneCnt > 0
-        ? `${doneCnt}/${st.stops.length} Done • ${minutesToTimeStr(timeStrToMinutes(st.startTime))}`
-        : `${minutesToTimeStr(timeStrToMinutes(st.startTime))} • ${st.stops.length} Houses`;
-  });
-
-  const completedStops = computed.filter((s) => s.visited);
-  const upcomingStops = computed.filter((s) => !s.visited);
-  const nextStop = upcomingStops[0] || null;
-  const finalStop = computed[computed.length - 1];
-
-  // Header & Metrics
-  document.getElementById("header-subtitle").textContent =
-    `${meta.shortLabel} (${meta.dateLabel}) • Gather ${minutesToTimeStr(timeStrToMinutes(daySt.startTime))} • ${daySt.defaultVisitMins}m/house`;
-  document.getElementById("metric-progress").textContent = `${completedStops.length} / ${computed.length}`;
-  document.getElementById("metric-dinner-eta").textContent = finalStop ? finalStop.arrivalFormatted : "--:--";
-  document.getElementById("metric-ratios").textContent = `${totalTravelMins}m / ${totalCarolMins}m`;
-
-  const pct = computed.length ? (completedStops.length / computed.length) * 100 : 0;
-  document.getElementById("progress-fill").style.width = `${pct}%`;
-
-  // Snapshot Drawer
-  const nextIndex = nextStop ? nextStop.index : -1;
-  document.getElementById("snapshot-miles-label").textContent = `• ${meta.totalMiles} (${computed.length} stops)`;
-  document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, nextIndex);
-  document.getElementById("snapshot-meta").innerHTML = `<strong>${meta.shortLabel} Route:</strong> ${escapeHtml(meta.routeSummary)}`;
-  document.getElementById("snapshot-map-links").innerHTML = buildMultiStopGoogleMapsLinks(computed);
-
-  // Hero Spotlight
-  const heroEl = document.getElementById("hero-spotlight");
-  if (nextStop) {
-    if (houseTimer.stopId !== nextStop.id) {
-      resetHouseTimer(nextStop.id, nextStop.duration);
-    }
-    const nav = getNavUrls(nextStop.address, nextStop.lat, nextStop.lng);
-    const isWalk = (nextStop.distance || "").toLowerCase().includes("walk");
-    const distHtml =
-      nextStop.distFromUser !== null
-        ? `<div class="gps-distance-pill">📍 ${nextStop.distFromUser.toFixed(1)} mi from your location</div>`
-        : "";
-
-    heroEl.innerHTML = `
-      <section class="hero-card">
-        <div class="hero-eyebrow">
-          <span class="hero-tag">🎯 Next Stop • #${nextStop.index + 1} of ${computed.length}</span>
-          <span class="hero-eta">${nextStop.arrivalFormatted} – ${nextStop.departureFormatted}</span>
-        </div>
-        <div class="hero-family">${escapeHtml(nextStop.family)}</div>
-        <div class="hero-address" onclick="copyAddress('${escapeJs(nextStop.address)}')" title="Tap to copy address">
-          📍 ${escapeHtml(nextStop.address)}
-        </div>
-        ${distHtml}
-        ${nextStop.notes ? `<div class="hero-notes">${escapeHtml(nextStop.notes)}</div>` : ""}
-        <div class="hero-actions">
-          <a class="btn-car btn-go-primary" href="${nav.primaryUrl}" target="_blank" rel="noopener">
-            ${isWalk ? "🚶 Walk" : "🧭 Navigate"}
-          </a>
-          <button id="hero-timer-btn" class="btn-car btn-timer-hero" onclick="toggleHouseTimer('${nextStop.id}', ${nextStop.duration})">
-            ⏱️ ${nextStop.duration}m Timer
-          </button>
-          <button class="btn-car btn-checkin-hero" onclick="toggleVisited('${nextStop.id}')">
-            ✓ Arrived
-          </button>
-        </div>
-      </section>
-    `;
-    updateTimerButtonUI();
-  } else {
-    heroEl.innerHTML = `
-      <section class="hero-card" style="border-color: var(--accent-mint); background: #051b14;">
-        <div class="hero-family" style="color: var(--accent-mint);">🎉 Ward 4 ${meta.shortLabel} Complete!</div>
-        <div class="hero-address">Merry Christmas! Enjoy dinner at ${escapeHtml(finalStop ? finalStop.family : "the host")}'s home.</div>
-      </section>
-    `;
-  }
-
-  // Filter by search query if active
-  const matchesQuery = (s) =>
-    !searchQuery ||
-    s.family.toLowerCase().includes(searchQuery) ||
-    s.address.toLowerCase().includes(searchQuery) ||
-    (s.notes || "").toLowerCase().includes(searchQuery) ||
-    `#${s.index + 1}`.includes(searchQuery);
-
-  const filteredCompleted = completedStops.filter(matchesQuery);
-  const filteredUpcoming = upcomingStops.filter(matchesQuery);
-
-  // Completed Section
-  const completedEl = document.getElementById("completed-section");
-  if (filteredCompleted.length > 0) {
-    completedEl.innerHTML = `
-      <div class="section-heading">Completed (${filteredCompleted.length})</div>
-      ${filteredCompleted
-        .map(
-          (s) => `
-          <div class="stop-card visited-collapsed" id="card-${s.id}">
-            <div class="collapsed-info">
-              <span class="collapsed-check">✓</span>
-              <span class="collapsed-title">#${s.index + 1} ${escapeHtml(s.family)} (${s.checkedInAt || "Done"})</span>
-            </div>
-            <button class="collapsed-undo" onclick="toggleVisited('${s.id}')">Undo</button>
-          </div>
-        `
-        )
-        .join("")}
-    `;
-  } else {
-    completedEl.innerHTML = "";
-  }
-
-  // Upcoming Section
-  const upcomingEl = document.getElementById("upcoming-section");
-  if (filteredUpcoming.length > 0) {
-    upcomingEl.innerHTML = `
-      <div class="section-heading">${searchQuery ? "Matching Houses" : `Remaining ${meta.shortLabel} Schedule`} (${filteredUpcoming.length})</div>
-      ${filteredUpcoming
-        .map((stop) => {
-          const isNext = nextStop && stop.id === nextStop.id;
-          const nav = getNavUrls(stop.address, stop.lat, stop.lng);
-          const canMoveUp = stop.index > 0 && !stop.isLast;
-          const canMoveDown = stop.index < computed.length - 2;
-          const isWalk = (stop.distance || "").toLowerCase().includes("walk");
-
-          const connectorHtml =
-            stop.index === 0 || searchQuery
-              ? ""
-              : `
-              <div class="drive-connector ${isWalk ? "walk-leg" : ""}">
-                <button class="drive-pill" onclick="openLegModal(${stop.index})">
-                  ${isWalk ? "🚶" : "🚗"} <strong>${stop.driveFromPrev} min</strong>
-                  ${stop.distance ? `<span>(${escapeHtml(stop.distance)})</span>` : ""}
-                  <span>✎</span>
-                </button>
-                <span>Arrive ${stop.arrivalFormatted}</span>
-              </div>
-            `;
-
-          const distBadge =
-            stop.distFromUser !== null
-              ? `<span class="badge-dist">${stop.distFromUser.toFixed(1)} mi</span>`
-              : "";
-
-          return `
-            ${connectorHtml}
-            <article class="stop-card ${isNext ? "active-next" : ""} ${stop.isLast ? "final-dinner" : ""}" id="card-${stop.id}">
-              <div class="card-top">
-                <div class="seq-and-time">
-                  <span class="seq-badge">#${stop.index + 1}</span>
-                  <span class="time-window">${stop.arrivalFormatted} – ${stop.departureFormatted}</span>
-                  ${stop.isLast ? `<span class="badge-dinner">🍽️ Dinner Host</span>` : ""}
-                  ${distBadge}
-                </div>
-                ${
-                  stop.isLast || searchQuery
-                    ? ""
-                    : `
-                    <div class="reorder-controls">
-                      <button class="move-btn" onclick="moveStop(${stop.index}, -1)" ${canMoveUp ? "" : "disabled"} aria-label="Move up">▲</button>
-                      <button class="move-btn" onclick="moveStop(${stop.index}, 1)" ${canMoveDown ? "" : "disabled"} aria-label="Move down">▼</button>
-                    </div>
-                  `
-                }
-              </div>
-              <div class="family-name">${escapeHtml(stop.family)}</div>
-              <div class="address-line" onclick="copyAddress('${escapeJs(stop.address)}')" title="Tap to copy address">
-                📍 ${escapeHtml(stop.address)}
-              </div>
-              ${stop.notes ? `<div class="notes-line">${escapeHtml(stop.notes)}</div>` : ""}
-              <div class="card-actions">
-                <a class="nav-btn gmaps" href="${nav.primaryUrl}" target="_blank" rel="noopener">${isWalk ? "🚶 Walk" : "🧭 Navigate"}</a>
-                <button class="nav-btn headsup" onclick="sendHostHeadsUp('${escapeJs(stop.family)}', '${escapeJs(stop.arrivalFormatted)}')">📲 Heads-Up</button>
-                <button class="checkin-btn" onclick="toggleVisited('${stop.id}')">✓ Check In</button>
-              </div>
-            </article>
-          `;
-        })
-        .join("")}
-    `;
-  } else if (searchQuery && filteredCompleted.length === 0) {
-    upcomingEl.innerHTML = `<div class="empty-search">No house matched "<strong>${escapeHtml(searchQuery)}</strong>" on ${meta.shortLabel}. Try switching to ${state.activeDay === "day1" ? "Day 2" : "Day 1"}!</div>`;
-  } else {
-    upcomingEl.innerHTML = "";
-  }
-
-  // Coordinator Footer
-  const callBtn = document.getElementById("footer-call-btn");
-  const smsBtn = document.getElementById("footer-sms-btn");
-  if (state.coordPhone && state.coordPhone.trim()) {
-    const digits = state.coordPhone.replace(/[^\d+]/g, "");
-    const label = state.coordName ? state.coordName : "Coordinator";
-    callBtn.href = `tel:${digits}`;
-    callBtn.textContent = `📞 Call ${label}`;
-    callBtn.style.display = "inline-block";
-    smsBtn.href = `sms:${digits}`;
-    smsBtn.textContent = `💬 Text ${label}`;
-    smsBtn.style.display = "inline-block";
-  } else {
-    callBtn.style.display = "none";
-    smsBtn.style.display = "none";
-  }
+function jumpToStop(id) {
+  const el = document.getElementById(`card-${id}`);
+  if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
 }
-
-// ---------- Actions ----------
-
-function copyAddress(addr) {
+function copyText(text, toastMsg) {
   if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(addr).then(() => showToast("Address copied to clipboard!"));
-  } else {
-    showToast(addr);
+    navigator.clipboard.writeText(text).catch(() => {});
   }
+  if (toastMsg) showToast(toastMsg);
 }
-
-function shareWhatsAppStatus() {
-  const meta = currentDayMeta();
-  const daySt = currentDayState();
-  const { computed } = calculateSchedule(daySt);
-  const done = computed.filter((s) => s.visited);
-  const next = computed.find((s) => !s.visited);
-  const dinner = computed[computed.length - 1];
-
-  let msg = `🎄 Carol ${meta.shortLabel} - Update\n`;
-  if (done.length > 0) {
-    const lastDone = done[done.length - 1];
-    msg += `✅ Completed: #${lastDone.index + 1} ${lastDone.family} (${done.length}/${computed.length})\n`;
-  }
-  if (next) {
-    msg += `🚗 Next Stop: #${next.index + 1} ${next.family} (ETA ${next.arrivalFormatted})\n`;
-    msg += `📍 ${next.address}\n`;
-  } else {
-    msg += `🎉 All houses completed!\n`;
-  }
-  if (dinner) {
-    msg += `🍽️ Final Stop ETA (${dinner.family}): ${dinner.arrivalFormatted}`;
-  }
-
-  // Always copy to clipboard first so user can also paste directly into 'Ward 4- Blessed Kunjachan'
-  if (navigator.clipboard && navigator.clipboard.writeText) {
-    navigator.clipboard.writeText(msg).catch(() => {});
-  }
-
-  showToast(`Copied! Select "Ward 4- Blessed Kunjachan" in WhatsApp`);
-
-  // Open WhatsApp with the message pre-filled
-  const waUrl = `https://wa.me/?text=${encodeURIComponent(msg)}`;
-  window.open(waUrl, "_blank", "noopener");
-}
-
-// ---------- Add Unplanned New House (Smart Best Path & Timing) ----------
-
-function openAddHouseModal() {
-  const daySt = currentDayState();
-  document.getElementById("add-family").value = "";
-  document.getElementById("add-address").value = "";
-  document.getElementById("add-placement").value = "auto";
-  document.getElementById("add-visit-mins").value = daySt.defaultVisitMins || 20;
-  document.getElementById("add-notes").value = "";
-  document.getElementById("add-house-status").textContent =
-    "Smart mode geocodes the address and inserts it where it adds the least extra driving time (before Dinner).";
-  const btn = document.getElementById("btn-add-house-submit");
-  btn.disabled = false;
-  btn.textContent = "Find Best Spot & Add";
-  document.getElementById("add-house-modal").classList.add("open");
-}
-
-async function geocodeAddressOnline(address) {
-  const query = /nc|north carolina/i.test(address) ? address : `${address}, Charlotte, NC`;
-  const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(query)}`;
-  const resp = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!resp.ok) return null;
-  const data = await resp.json();
-  if (Array.isArray(data) && data.length > 0) {
-    return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
-  }
-  return null;
-}
-
-async function fetchLegDriveTime(fromCoords, toCoords) {
-  // Fallback estimate using straight-line distance if offline/OSRM unavailable
-  const straightMi = haversineMiles(fromCoords.lat, fromCoords.lng, toCoords.lat, toCoords.lng);
-  if (straightMi <= 0.22) {
-    const walkMins = Math.max(2, Math.round(straightMi * 20));
-    return { driveMins: walkMins, distance: `${walkMins} min walk (${straightMi.toFixed(2)} mi)` };
-  }
-  try {
-    const url = `https://router.project-osrm.org/route/v1/driving/${fromCoords.lng},${fromCoords.lat};${toCoords.lng},${toCoords.lat}?overview=false`;
-    const resp = await fetch(url);
-    if (resp.ok) {
-      const data = await resp.json();
-      if (data.routes && data.routes[0]) {
-        const mi = data.routes[0].distance / 1609.344;
-        const mins = Math.max(1, Math.round(data.routes[0].duration / 60));
-        if (mi <= 0.25) {
-          const walkMins = Math.max(2, Math.round(mi * 20));
-          return { driveMins: walkMins, distance: `${walkMins} min walk (${mi.toFixed(2)} mi)` };
-        }
-        return { driveMins: mins, distance: `${mi.toFixed(1)} mi drive` };
-      }
-    }
-  } catch (e) {}
-  const estMi = straightMi * 1.3;
-  const estMins = Math.max(2, Math.round(estMi * 2.4));
-  return { driveMins: estMins, distance: `~${estMi.toFixed(1)} mi drive` };
-}
-
-async function submitNewHouse() {
-  const family = document.getElementById("add-family").value.trim();
-  const address = document.getElementById("add-address").value.trim();
-  const placement = document.getElementById("add-placement").value;
-  const visitMins = Math.max(5, parseInt(document.getElementById("add-visit-mins").value, 10) || 20);
-  const notesInput = document.getElementById("add-notes").value.trim();
-  const statusEl = document.getElementById("add-house-status");
-  const btn = document.getElementById("btn-add-house-submit");
-
-  if (!family || !address) {
-    statusEl.textContent = "Please enter both Family Name and Street Address.";
-    return;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "Calculating route...";
-  statusEl.textContent = "Locating address & checking best detour...";
-
-  const daySt = currentDayState();
-  enforceFinalHostLock(daySt);
-
-  let coords = null;
-  try {
-    coords = await geocodeAddressOnline(address);
-  } catch (e) {
-    coords = null;
-  }
-
-  // Determine valid insertion range: only among unvisited stops, never after locked Dinner Host
-  const firstUnvisitedIdx = daySt.stops.findIndex((s) => !s.visited);
-  const dinnerIdx = daySt.stops.length - 1; // locked final host
-  const minInsertIdx = firstUnvisitedIdx === -1 ? dinnerIdx : Math.max(firstUnvisitedIdx, 0);
-  const maxInsertIdx = dinnerIdx; // inserting at dinnerIdx places it right BEFORE Dinner Host
-
-  let insertIdx = maxInsertIdx;
-  let extraDetourInfo = "";
-
-  if (placement === "next") {
-    insertIdx = minInsertIdx;
-  } else if (placement === "before-dinner") {
-    insertIdx = maxInsertIdx;
-  } else if (coords && maxInsertIdx > minInsertIdx) {
-    // Smart Auto-Insert: test every valid slot [minInsertIdx .. maxInsertIdx] for minimum added distance
-    let bestCost = Infinity;
-    let bestSlot = maxInsertIdx;
-
-    for (let slot = minInsertIdx; slot <= maxInsertIdx; slot++) {
-      const prev = slot > 0 ? daySt.stops[slot - 1] : null;
-      const next = slot < daySt.stops.length ? daySt.stops[slot] : null;
-
-      let addedMiles = 0;
-      if (prev && typeof prev.lat === "number" && next && typeof next.lat === "number") {
-        const direct = haversineMiles(prev.lat, prev.lng, next.lat, next.lng);
-        const viaNew =
-          haversineMiles(prev.lat, prev.lng, coords.lat, coords.lng) +
-          haversineMiles(coords.lat, coords.lng, next.lat, next.lng);
-        addedMiles = viaNew - direct;
-      } else if (prev && typeof prev.lat === "number") {
-        addedMiles = haversineMiles(prev.lat, prev.lng, coords.lat, coords.lng);
-      } else if (next && typeof next.lat === "number") {
-        addedMiles = haversineMiles(coords.lat, coords.lng, next.lat, next.lng);
-      }
-
-      if (addedMiles < bestCost) {
-        bestCost = addedMiles;
-        bestSlot = slot;
-      }
-    }
-    insertIdx = bestSlot;
-    extraDetourInfo = ` (~+${Math.max(0.1, bestCost * 1.25).toFixed(1)} mi detour)`;
-  }
-
-  // Compute driving time & distance for incoming leg (prev -> new) and outgoing leg (new -> next)
-  const prevStop = insertIdx > 0 ? daySt.stops[insertIdx - 1] : null;
-  const nextStop = insertIdx < daySt.stops.length ? daySt.stops[insertIdx] : null;
-
-  let incomingDriveMins = insertIdx === 0 ? 0 : 6;
-  let incomingDistance = insertIdx === 0 ? "Starting House" : "Est. 6 min drive";
-
-  if (coords && prevStop && typeof prevStop.lat === "number") {
-    const legIn = await fetchLegDriveTime({ lat: prevStop.lat, lng: prevStop.lng }, coords);
-    incomingDriveMins = legIn.driveMins;
-    incomingDistance = legIn.distance;
-  }
-
-  if (coords && nextStop && typeof nextStop.lat === "number") {
-    const legOut = await fetchLegDriveTime(coords, { lat: nextStop.lat, lng: nextStop.lng });
-    nextStop.driveMins = legOut.driveMins;
-    nextStop.distance = legOut.distance;
-  }
-
-  const newStop = {
-    id: `added-${Date.now()}`,
-    family,
-    address,
-    driveMins: incomingDriveMins,
-    distance: incomingDistance,
-    visitMins,
-    notes: notesInput ? `✨ Added during carol • ${notesInput}` : "✨ Unplanned house added during carol",
-    lat: coords ? coords.lat : undefined,
-    lng: coords ? coords.lng : undefined,
-    visited: false,
-    checkedInAt: null
-  };
-
-  daySt.stops.splice(insertIdx, 0, newStop);
-  saveState();
-  render();
-  closeModal("add-house-modal");
-
-  const spotNum = insertIdx + 1;
-  showToast(
-    coords
-      ? `Added ${family} at Stop #${spotNum}${extraDetourInfo}`
-      : `Added ${family} at Stop #${spotNum} (offline estimate)`
-  );
-  setTimeout(() => jumpToStop(newStop.id), 150);
-}
-
-function toggleVisited(stopId) {
-  const daySt = currentDayState();
-  const stop = daySt.stops.find((s) => s.id === stopId);
-  if (!stop) return;
-  stop.visited = !stop.visited;
-  if (stop.visited) {
-    const now = new Date();
-    stop.checkedInAt = minutesToTimeStr(now.getHours() * 60 + now.getMinutes());
-    showToast(`✓ Checked in: ${stop.family}`);
-  } else {
-    stop.checkedInAt = null;
-  }
-  saveState();
-  render();
-}
-
-function shiftScheduleToNow() {
-  const daySt = currentDayState();
-  const now = new Date();
-  const nowMins = now.getHours() * 60 + now.getMinutes();
-  const nextIdx = daySt.stops.findIndex((s) => !s.visited);
-  if (nextIdx === -1) return showToast("All stops completed!");
-
-  let elapsedBeforeNext = 0;
-  for (let i = 0; i < nextIdx; i++) {
-    if (i > 0) elapsedBeforeNext += Number(daySt.stops[i].driveMins) || 0;
-    elapsedBeforeNext += Number(daySt.stops[i].visitMins) || daySt.defaultVisitMins || 20;
-  }
-  if (nextIdx > 0) elapsedBeforeNext += Number(daySt.stops[nextIdx].driveMins) || 0;
-
-  const adjustedStart = (((nowMins - elapsedBeforeNext) % 1440) + 1440) % 1440;
-  daySt.startTime = `${String(Math.floor(adjustedStart / 60)).padStart(2, "0")}:${String(adjustedStart % 60).padStart(2, "0")}`;
-  saveState();
-  render();
-  showToast(`Shifted live schedule to ${minutesToTimeStr(nowMins)}`);
-}
-
-function moveStop(index, delta) {
-  const daySt = currentDayState();
-  const target = index + delta;
-  if (target < 0 || target >= daySt.stops.length - 1) return;
-  [daySt.stops[index], daySt.stops[target]] = [daySt.stops[target], daySt.stops[index]];
-  saveState();
-  render();
-}
-
-// ---------- Songbook ----------
-
-function openSongbookModal() {
-  renderSongbook();
-  document.getElementById("songbook-modal").classList.add("open");
-}
-
-function renderSongbook() {
-  const songs = state.songs && state.songs.length ? state.songs : window.CAROL_DATA.defaultSongs;
-  if (activeSongIdx >= songs.length) activeSongIdx = 0;
-  document.getElementById("song-tabs").innerHTML = songs
-    .map(
-      (s, idx) =>
-        `<button class="song-tab ${idx === activeSongIdx ? "active" : ""}" onclick="selectSong(${idx})">${escapeHtml(s.title)}</button>`
-    )
-    .join("");
-  const current = songs[activeSongIdx];
-  const box = document.getElementById("song-lyrics-box");
-  box.style.fontSize = `${songFontScale}rem`;
-  box.textContent = current.lyrics;
-
-  const delBtn = document.getElementById("btn-delete-song");
-  if (delBtn) {
-    delBtn.style.display = current.lang === "Custom" ? "inline-flex" : "none";
-  }
-}
-
-function selectSong(idx) {
-  activeSongIdx = idx;
-  renderSongbook();
-}
-
-function adjustSongFont(delta) {
-  songFontScale = Math.min(1.65, Math.max(0.85, songFontScale + delta));
-  document.getElementById("song-lyrics-box").style.fontSize = `${songFontScale}rem`;
-}
-
-function toggleAddSongPanel() {
-  document.getElementById("add-song-panel").classList.toggle("open");
-}
-
-function deleteCurrentSong() {
-  if (!Array.isArray(state.songs) || !state.songs[activeSongIdx]) return;
-  const song = state.songs[activeSongIdx];
-  if (song.lang !== "Custom") return;
-  state.songs.splice(activeSongIdx, 1);
-  activeSongIdx = Math.max(0, activeSongIdx - 1);
-  saveState();
-  renderSongbook();
-  showToast(`Removed "${song.title}"`);
-}
-
-function cleanExtractedLyrics(rawMarkdown) {
-  let title = "";
-  const titleMatch = rawMarkdown.match(/^Title:\s*(.+)$/m);
-  if (titleMatch) {
-    title = titleMatch[1]
-      .replace(/\s*[-|–—]\s*MADELY.*$/i, "")
-      .replace(/\s*(Malayalam\s*(&|and)\s*Manglish|Malayalam|Manglish|Christian\s+Devotional\s+Song|Song)?\s*Lyrics.*$/i, "")
-      .trim();
-  }
-
-  // Extract body after "Markdown Content:"
-  let body = rawMarkdown;
-  const contentIdx = body.indexOf("Markdown Content:");
-  if (contentIdx !== -1) {
-    body = body.slice(contentIdx + "Markdown Content:".length);
-  }
-
-  // Trim trailing boilerplate sections (Media, Related, Comments, Share, etc.)
-  const stopMarkers = [
-    /\n###\s*Media\b/i,
-    /\n###\s*Related\b/i,
-    /\n###\s*Comments\b/i,
-    /\n###\s*Leave a Reply\b/i,
-    /\n###\s*Share\b/i
-  ];
-  for (const marker of stopMarkers) {
-    const m = body.search(marker);
-    if (m !== -1) body = body.slice(0, m);
-  }
-
-  // Convert emoji images like ![Image 1: 🎵](...) back to their emoji, drop other images
-  body = body.replace(/!\[Image\s*\d*:\s*([^\]]+)\]\([^)]+\)/g, "$1");
-  body = body.replace(/!\[[^\]]*\]\([^)]+\)/g, "");
-
-  // Remove empty links / toolbar lines like [](https://...)|[](...)|A A A
-  body = body.replace(/\[\]\([^)]+\)/g, "");
-  body = body.replace(/^[\s|]*A\s+A\s+A\s*$/gm, "");
-  body = body.replace(/^\*\*My Notes\*\*\s*$/gim, "");
-
-  // Convert standard markdown links [text](url) -> text
-  body = body.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
-
-  // Clean role prefixes like **M**, **F**, **A** at start of lines
-  body = body.replace(/^\*\*([MFA])\*\*\s*/gm, "[$1] ");
-
-  // Clean headings and bold/italic markers
-  body = body.replace(/^#{1,6}\s*(.+)$/gm, "\n--- $1 ---");
-  body = body.replace(/\*\*(.+?)\*\*/g, "$1");
-  body = body.replace(/__([^_]+)__/g, "$1");
-
-  // Clean stray pipes, trailing spaces, and excessive blank lines
-  body = body
-    .split(/\r?\n/)
-    .map((line) => line.replace(/^\|+\s*$/, "").trimEnd())
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-
-  return { title, lyrics: body };
-}
-
-async function fetchLyricsFromUrl() {
-  const urlInput = document.getElementById("new-song-url");
-  const statusEl = document.getElementById("fetch-lyrics-status");
-  const btn = document.getElementById("btn-fetch-lyrics");
-  let url = (urlInput.value || "").trim();
-
-  if (!url) {
-    statusEl.textContent = "Please paste a lyrics webpage URL first.";
-    statusEl.style.color = "var(--accent-crimson)";
-    return;
-  }
-  if (!/^https?:\/\//i.test(url)) {
-    url = "https://" + url;
-    urlInput.value = url;
-  }
-
-  btn.disabled = true;
-  btn.textContent = "Fetching...";
-  statusEl.style.color = "var(--accent-sky)";
-  statusEl.textContent = "Extracting song title & lyrics from webpage...";
-
-  try {
-    const resp = await fetch(`https://r.jina.ai/${url}`, {
-      headers: { Accept: "text/plain" }
-    });
-    if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
-    const raw = await resp.text();
-    const { title, lyrics } = cleanExtractedLyrics(raw);
-
-    if (!lyrics || lyrics.length < 20) {
-      throw new Error("Could not detect lyrics text on that page");
-    }
-
-    if (title && !document.getElementById("new-song-title").value.trim()) {
-      document.getElementById("new-song-title").value = title;
-    }
-    document.getElementById("new-song-lyrics").value = lyrics;
-    statusEl.style.color = "var(--accent-mint)";
-    statusEl.textContent = "✓ Lyrics imported! Review below and tap Save to Songbook.";
-  } catch (err) {
-    statusEl.style.color = "var(--accent-crimson)";
-    statusEl.textContent = "Could not fetch that URL automatically (check internet or copy-paste lyrics below).";
-  } finally {
-    btn.disabled = false;
-    btn.textContent = "Fetch";
-  }
-}
-
-function saveNewSong() {
-  const title = document.getElementById("new-song-title").value.trim();
-  const lyrics = document.getElementById("new-song-lyrics").value.trim();
-  if (!title || !lyrics) {
-    showToast("Please enter both title and lyrics");
-    return;
-  }
-  if (!Array.isArray(state.songs)) state.songs = JSON.parse(JSON.stringify(window.CAROL_DATA.defaultSongs));
-  state.songs.push({ title, lang: "Custom", lyrics });
-  activeSongIdx = state.songs.length - 1;
-  saveState();
-  document.getElementById("new-song-url").value = "";
-  document.getElementById("new-song-title").value = "";
-  document.getElementById("new-song-lyrics").value = "";
-  document.getElementById("fetch-lyrics-status").textContent =
-    "Paste a lyrics webpage link (e.g., madely.us) and tap Fetch to auto-fill Title & Lyrics.";
-  document.getElementById("fetch-lyrics-status").style.color = "";
-  document.getElementById("add-song-panel").classList.remove("open");
-  renderSongbook();
-  showToast(`Added "${title}" to Songbook!`);
-}
-
-// ---------- Settings Modal ----------
-
-function openSettingsModal() {
-  const meta = currentDayMeta();
-  const daySt = currentDayState();
-  document.getElementById("settings-modal-title").textContent = `⚙️ ${meta.shortLabel} (${meta.dateLabel}) Settings`;
-  document.getElementById("cfg-start-time").value = daySt.startTime;
-  document.getElementById("cfg-visit-mins").value = daySt.defaultVisitMins;
-  document.getElementById("cfg-nav-app").value = state.primaryNavApp || "google";
-  document.getElementById("cfg-coord-name").value = state.coordName || "";
-  document.getElementById("cfg-coord-phone").value = state.coordPhone || "";
-  document.getElementById("cfg-dinner-host").innerHTML = daySt.stops
-    .map(
-      (s) =>
-        `<option value="${s.id}" ${s.id === daySt.lockedFinalId ? "selected" : ""}>${escapeHtml(s.family)}</option>`
-    )
-    .join("");
-  document.getElementById("settings-modal").classList.add("open");
-}
-
-function saveSettings() {
-  const daySt = currentDayState();
-  daySt.startTime = document.getElementById("cfg-start-time").value || currentDayMeta().defaultStartTime;
-  const newDefault = Math.max(5, parseInt(document.getElementById("cfg-visit-mins").value, 10) || 20);
-  daySt.stops.forEach((s, idx) => {
-    if (idx < daySt.stops.length - 1 && s.visitMins === daySt.defaultVisitMins) {
-      s.visitMins = newDefault;
-    }
-  });
-  daySt.defaultVisitMins = newDefault;
-  daySt.lockedFinalId = document.getElementById("cfg-dinner-host").value;
-  state.primaryNavApp = document.getElementById("cfg-nav-app").value;
-  state.coordName = document.getElementById("cfg-coord-name").value.trim();
-  state.coordPhone = document.getElementById("cfg-coord-phone").value.trim();
-  enforceFinalHostLock(daySt);
-  saveState();
-  render();
-  closeModal("settings-modal");
-  showToast("Settings saved");
-}
-
-function resetProgress() {
-  const daySt = currentDayState();
-  daySt.stops.forEach((s) => {
-    s.visited = false;
-    s.checkedInAt = null;
-  });
-  saveState();
-  render();
-  closeModal("settings-modal");
-  showToast(`${currentDayMeta().shortLabel} check-ins reset`);
-}
-
-function restoreDefaultDay() {
-  state.days[state.activeDay] = buildDefaultDayState(state.activeDay);
-  saveState();
-  render();
-  closeModal("settings-modal");
-  showToast(`${currentDayMeta().shortLabel} official route restored`);
-}
-
-// ---------- Import / Edit Stops Modal ----------
-
-function openImportModal() {
-  const meta = currentDayMeta();
-  const daySt = currentDayState();
-  document.getElementById("import-modal-title").textContent = `✏️ Edit ${meta.shortLabel} Stops`;
-  document.getElementById("import-textarea").value = daySt.stops
-    .map((s) => `${s.family} | ${s.address} | ${s.driveMins} | ${s.distance || ""} | ${s.notes || ""}`)
-    .join("\n");
-  document.getElementById("import-modal").classList.add("open");
-}
-
-function exportToCSV() {
-  navigator.clipboard?.writeText(document.getElementById("import-textarea").value);
-  showToast("Copied stops list to clipboard");
-}
-
-function applyImportedStops() {
-  const daySt = currentDayState();
-  const raw = document.getElementById("import-textarea").value.trim();
-  if (!raw) return;
-  try {
-    let parsedStops = [];
-    if (raw.startsWith("[")) {
-      const arr = JSON.parse(raw);
-      parsedStops = arr.map((item, i) => ({
-        id: `custom-${Date.now()}-${i}`,
-        family: item.family || item.familyName || `Family #${i + 1}`,
-        address: item.address || "",
-        driveMins: Number(item.driveMins ?? (i === 0 ? 0 : 5)),
-        distance: item.distance || "",
-        visitMins: Number(item.visitMins || (i === arr.length - 1 ? 60 : daySt.defaultVisitMins)),
-        notes: item.notes || "",
-        lat: item.lat,
-        lng: item.lng,
-        visited: false,
-        checkedInAt: null
-      }));
-    } else {
-      const lines = raw
-        .split(/\r?\n/)
-        .map((l) => l.trim())
-        .filter(Boolean);
-      parsedStops = lines.map((line, i) => {
-        const parts = line.split(line.includes("|") ? "|" : ",").map((p) => p.trim());
-        const existing = daySt.stops.find((s) => s.family.toLowerCase() === (parts[0] || "").toLowerCase());
-        return {
-          id: existing ? existing.id : `custom-${Date.now()}-${i}`,
-          family: parts[0] || `Family #${i + 1}`,
-          address: parts[1] || "",
-          driveMins: i === 0 ? 0 : parseInt(parts[2], 10) || 5,
-          distance: parts[3] || "",
-          visitMins: i === lines.length - 1 ? 60 : daySt.defaultVisitMins,
-          notes: parts.slice(4).join(", "),
-          lat: existing ? existing.lat : undefined,
-          lng: existing ? existing.lng : undefined,
-          visited: false,
-          checkedInAt: null
-        };
-      });
-    }
-    if (!parsedStops.length) throw new Error();
-    daySt.stops = parsedStops;
-    daySt.lockedFinalId = parsedStops[parsedStops.length - 1].id;
-    saveState();
-    render();
-    closeModal("import-modal");
-    showToast(`Loaded ${parsedStops.length} stops!`);
-  } catch (e) {
-    alert("Format error. Use: Family Name | Address | TravelMins | Distance | Notes");
-  }
-}
-
-// ---------- Travel Leg Editor ----------
-
-function openLegModal(idx) {
-  const daySt = currentDayState();
-  const stop = daySt.stops[idx];
-  if (!stop) return;
-  document.getElementById("leg-stop-index").value = idx;
-  document.getElementById("leg-modal-title").textContent = `🚗 Travel to ${stop.family}`;
-  document.getElementById("leg-drive-mins").value = stop.driveMins;
-  document.getElementById("leg-distance").value = stop.distance || "";
-  document.getElementById("leg-visit-mins").value = stop.visitMins || daySt.defaultVisitMins;
-  document.getElementById("leg-modal").classList.add("open");
-}
-
-function saveLegEdit() {
-  const daySt = currentDayState();
-  const idx = parseInt(document.getElementById("leg-stop-index").value, 10);
-  const stop = daySt.stops[idx];
-  if (!stop) return;
-  stop.driveMins = Math.max(0, parseInt(document.getElementById("leg-drive-mins").value, 10) || 0);
-  stop.distance = document.getElementById("leg-distance").value.trim();
-  stop.visitMins = Math.max(5, parseInt(document.getElementById("leg-visit-mins").value, 10) || daySt.defaultVisitMins);
-  saveState();
-  render();
-  closeModal("leg-modal");
-  showToast("Stop updated");
-}
-
-// ---------- Helpers ----------
-
 function closeModal(id) {
   document.getElementById(id).classList.remove("open");
 }
 function closeOnBackdrop(e, id) {
-  if (e.target.id === id) closeModal(id);
+  if (e.target.id === id) {
+    if (id === "songbook-modal") closeSongbookModal();
+    else closeModal(id);
+  }
 }
-
-function escapeHtml(str) {
+window.escapeHtml = function (str) {
   return String(str || "")
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
     .replace(/"/g, "&quot;");
-}
-
+};
 function escapeJs(str) {
-  return String(str || "")
-    .replace(/\\/g, "\\\\")
-    .replace(/'/g, "\\'");
+  return String(str || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
 }
-
-function showToast(msg) {
+window.showToast = function (msg) {
   const t = document.getElementById("toast");
   t.textContent = msg;
   t.classList.add("show");
   clearTimeout(window._tt);
   window._tt = setTimeout(() => t.classList.remove("show"), 2600);
-}
+};
 
-// Initial Render
-render();
+// Boot App
+bootActiveWard();
