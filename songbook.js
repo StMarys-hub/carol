@@ -1,37 +1,170 @@
 /* Carol Songbook Module:
  * - Add Song panel on TOP + Full-Width Lyrics
- * - madely.us Lyrics + Audio-Only Karaoke Track detection (via Edge Function or r.jina.ai fallback)
- * - Strict Audio-Only inline HTML5 player (ZERO video UI, shown ONLY when audio track exists)
+ * - madely.us Lyrics + Karaoke Track detection (direct MP3/M4A OR YouTube URL)
+ * - Strict Audio-Only inline Karaoke bar (ZERO visible video player/thumbnail):
+ *     * Direct MP3/M4A/OGG/WAV -> HTML5 Audio
+ *     * YouTube URL (youtube.com / youtu.be) -> Hidden off-screen YT.Player audio-only host
+ * - Conditionally shown ONLY when a song has a valid audio/YouTube karaoke URL
  * - Auto-pauses on song switch or modal close
  */
 
 window.CarolSongbook = (function () {
   let activeIdx = 0;
   let fontScale = 1.08;
+
+  // HTML5 Audio state
   let audioEl = null;
 
-  function ensureAudio() {
+  // Hidden YouTube Audio-Only state
+  let mode = "none"; // "html5" | "youtube" | "none"
+  let currentYtId = "";
+  let ytPlayer = null;
+  let ytReady = false;
+  let ytApiLoading = false;
+  let ytPendingPlay = false;
+  let ytPollId = null;
+
+  function extractYouTubeId(url) {
+    if (!url || typeof url !== "string") return "";
+    const patterns = [
+      /(?:youtube\.com\/watch\?(?:.*&)?v=|youtu\.be\/|youtube\.com\/embed\/|youtube\.com\/shorts\/|music\.youtube\.com\/watch\?(?:.*&)?v=)([A-Za-z0-9_-]{11})/i
+    ];
+    for (const p of patterns) {
+      const m = url.match(p);
+      if (m && m[1]) return m[1];
+    }
+    return "";
+  }
+
+  function ensureHiddenYtHost() {
+    let host = document.getElementById("carol-yt-audio-host");
+    if (!host) {
+      host = document.createElement("div");
+      host.id = "carol-yt-audio-host";
+      host.setAttribute("aria-hidden", "true");
+      host.style.cssText =
+        "position:fixed;left:-9999px;top:-9999px;width:1px;height:1px;opacity:0;pointer-events:none;overflow:hidden;";
+      const inner = document.createElement("div");
+      inner.id = "carol-yt-player-slot";
+      host.appendChild(inner);
+      document.body.appendChild(host);
+    }
+    return host;
+  }
+
+  function loadYouTubeApiIfNeeded(videoId) {
+    ensureHiddenYtHost();
+    if (window.YT && window.YT.Player) {
+      initOrCueYtPlayer(videoId);
+      return;
+    }
+    if (!ytApiLoading) {
+      ytApiLoading = true;
+      const prevCb = window.onYouTubeIframeAPIReady;
+      window.onYouTubeIframeAPIReady = function () {
+        if (typeof prevCb === "function") prevCb();
+        if (currentYtId) initOrCueYtPlayer(currentYtId);
+      };
+      const tag = document.createElement("script");
+      tag.src = "https://www.youtube.com/iframe_api";
+      tag.async = true;
+      document.head.appendChild(tag);
+    }
+  }
+
+  function initOrCueYtPlayer(videoId) {
+    if (!videoId || !(window.YT && window.YT.Player)) return;
+    if (ytPlayer && ytReady) {
+      try {
+        ytPlayer.cueVideoById(videoId);
+        if (ytPendingPlay) {
+          ytPendingPlay = false;
+          ytPlayer.playVideo();
+        }
+      } catch (e) {}
+      syncAudioUI();
+      return;
+    }
+    if (ytPlayer) return;
+
+    ytPlayer = new window.YT.Player("carol-yt-player-slot", {
+      width: "1",
+      height: "1",
+      videoId,
+      playerVars: {
+        autoplay: 0,
+        controls: 0,
+        rel: 0,
+        playsinline: 1,
+        modestbranding: 1,
+        origin: window.location.origin
+      },
+      events: {
+        onReady: () => {
+          ytReady = true;
+          if (ytPendingPlay) {
+            ytPendingPlay = false;
+            try { ytPlayer.playVideo(); } catch (e) {}
+          }
+          syncAudioUI();
+        },
+        onStateChange: (ev) => {
+          if (ev.data === window.YT.PlayerState.PLAYING) {
+            startYtPoll();
+          } else {
+            stopYtPoll();
+          }
+          syncAudioUI();
+        },
+        onError: () => {
+          stopYtPoll();
+          window.showToast && window.showToast("This YouTube track blocks embedded audio playback");
+          syncAudioUI();
+        }
+      }
+    });
+  }
+
+  function startYtPoll() {
+    stopYtPoll();
+    ytPollId = setInterval(syncAudioUI, 500);
+  }
+  function stopYtPoll() {
+    if (ytPollId) {
+      clearInterval(ytPollId);
+      ytPollId = null;
+    }
+  }
+
+  function ensureHtml5Audio() {
     if (!audioEl) {
       audioEl = new Audio();
       audioEl.preload = "metadata";
       audioEl.addEventListener("timeupdate", syncAudioUI);
       audioEl.addEventListener("loadedmetadata", syncAudioUI);
-      audioEl.addEventListener("ended", () => {
-        syncAudioUI();
-      });
+      audioEl.addEventListener("ended", syncAudioUI);
       audioEl.addEventListener("error", () => {
-        const bar = document.getElementById("karaoke-player-bar");
-        if (bar) bar.style.display = "none";
+        if (mode === "html5") {
+          const bar = document.getElementById("karaoke-player-bar");
+          if (bar) bar.style.display = "none";
+        }
       });
     }
     return audioEl;
   }
 
   function stopAudio() {
+    ytPendingPlay = false;
+    stopYtPoll();
     if (audioEl) {
       try {
         audioEl.pause();
         audioEl.currentTime = 0;
+      } catch (e) {}
+    }
+    if (ytPlayer && ytReady) {
+      try {
+        ytPlayer.pauseVideo();
       } catch (e) {}
     }
     syncAudioUI();
@@ -48,33 +181,83 @@ window.CarolSongbook = (function () {
     const playBtn = document.getElementById("karaoke-play-btn");
     const range = document.getElementById("karaoke-scrubber");
     const timeEl = document.getElementById("karaoke-time");
-    if (!playBtn || !range || !timeEl || !audioEl) return;
+    if (!playBtn || !range || !timeEl) return;
 
-    playBtn.textContent = audioEl.paused ? "▶ Play" : "⏸ Pause";
-    const dur = Number.isFinite(audioEl.duration) && audioEl.duration > 0 ? audioEl.duration : 0;
-    const cur = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
-    range.max = dur ? String(Math.floor(dur)) : "100";
-    range.value = dur ? String(Math.floor(cur)) : "0";
-    timeEl.textContent = `${fmtSec(cur)} / ${fmtSec(dur)}`;
+    if (mode === "youtube") {
+      let playing = false;
+      let dur = 0;
+      let cur = 0;
+      if (ytPlayer && ytReady) {
+        try {
+          const st = ytPlayer.getPlayerState();
+          playing = st === window.YT.PlayerState.PLAYING || st === window.YT.PlayerState.BUFFERING;
+          dur = Number(ytPlayer.getDuration()) || 0;
+          cur = Number(ytPlayer.getCurrentTime()) || 0;
+        } catch (e) {}
+      }
+      playBtn.textContent = playing ? "⏸ Pause" : "▶ Play";
+      range.max = dur ? String(Math.floor(dur)) : "100";
+      range.value = dur ? String(Math.floor(cur)) : "0";
+      timeEl.textContent = `${fmtSec(cur)} / ${fmtSec(dur)}`;
+      return;
+    }
+
+    if (mode === "html5" && audioEl) {
+      playBtn.textContent = audioEl.paused ? "▶ Play" : "⏸ Pause";
+      const dur = Number.isFinite(audioEl.duration) && audioEl.duration > 0 ? audioEl.duration : 0;
+      const cur = Number.isFinite(audioEl.currentTime) ? audioEl.currentTime : 0;
+      range.max = dur ? String(Math.floor(dur)) : "100";
+      range.value = dur ? String(Math.floor(cur)) : "0";
+      timeEl.textContent = `${fmtSec(cur)} / ${fmtSec(dur)}`;
+    }
   }
 
   function togglePlay() {
-    const a = ensureAudio();
-    if (!a.src) return;
-    if (a.paused) {
-      a.play().catch(() => {
-        window.showToast && window.showToast("Could not play karaoke track");
-      });
-    } else {
-      a.pause();
+    if (mode === "youtube") {
+      if (!currentYtId) return;
+      if (!ytPlayer || !ytReady) {
+        ytPendingPlay = true;
+        loadYouTubeApiIfNeeded(currentYtId);
+        window.showToast && window.showToast("Loading karaoke audio...");
+        return;
+      }
+      try {
+        const st = ytPlayer.getPlayerState();
+        if (st === window.YT.PlayerState.PLAYING) {
+          ytPlayer.pauseVideo();
+        } else {
+          ytPlayer.playVideo();
+        }
+      } catch (e) {}
+      syncAudioUI();
+      return;
     }
-    syncAudioUI();
+
+    if (mode === "html5") {
+      const a = ensureHtml5Audio();
+      if (!a.src) return;
+      if (a.paused) {
+        a.play().catch(() => {
+          window.showToast && window.showToast("Could not play karaoke track");
+        });
+      } else {
+        a.pause();
+      }
+      syncAudioUI();
+    }
   }
 
   function seekTo(val) {
-    const a = ensureAudio();
-    if (Number.isFinite(a.duration) && a.duration > 0) {
-      a.currentTime = Math.min(a.duration, Math.max(0, Number(val) || 0));
+    const targetSec = Math.max(0, Number(val) || 0);
+    if (mode === "youtube" && ytPlayer && ytReady) {
+      try {
+        ytPlayer.seekTo(targetSec, true);
+        syncAudioUI();
+      } catch (e) {}
+      return;
+    }
+    if (mode === "html5" && audioEl && Number.isFinite(audioEl.duration) && audioEl.duration > 0) {
+      audioEl.currentTime = Math.min(audioEl.duration, targetSec);
       syncAudioUI();
     }
   }
@@ -108,19 +291,33 @@ window.CarolSongbook = (function () {
       delBtn.style.display = canDelete ? "inline-flex" : "none";
     }
 
-    // Conditional Audio-Only Karaoke Bar (strictly hidden if no audio URL)
+    // Conditional Audio-Only Karaoke Bar (direct audio OR YouTube audio-only; strictly hidden if none)
     const trackUrl = (current.karaoke_audio_url || "").trim();
     if (karaokeBar) {
-      if (trackUrl && /^https?:\/\//i.test(trackUrl)) {
-        const a = ensureAudio();
-        if (a.src !== trackUrl) {
+      const ytId = extractYouTubeId(trackUrl);
+      if (ytId) {
+        if (mode !== "youtube" || currentYtId !== ytId) {
           stopAudio();
+          mode = "youtube";
+          currentYtId = ytId;
+          loadYouTubeApiIfNeeded(ytId);
+        }
+        karaokeBar.style.display = "flex";
+        syncAudioUI();
+      } else if (trackUrl && /^https?:\/\//i.test(trackUrl)) {
+        const a = ensureHtml5Audio();
+        if (mode !== "html5" || a.src !== trackUrl) {
+          stopAudio();
+          mode = "html5";
+          currentYtId = "";
           a.src = trackUrl;
         }
         karaokeBar.style.display = "flex";
         syncAudioUI();
       } else {
         stopAudio();
+        mode = "none";
+        currentYtId = "";
         karaokeBar.style.display = "none";
       }
     }
@@ -148,10 +345,15 @@ window.CarolSongbook = (function () {
         .trim();
     }
 
-    // Detect any direct audio track URL in the markdown/links (strictly audio extensions, zero video)
+    // Detect direct audio URL OR YouTube karaoke URL anywhere in the page (including Media section)
     let karaoke_audio_url = "";
     const audioMatch = rawMarkdown.match(/(https?:\/\/[^\s)"'<>]+\.(?:mp3|m4a|ogg|wav)(?:\?[^\s)"'<>]*)?)/i);
-    if (audioMatch) karaoke_audio_url = audioMatch[1];
+    if (audioMatch) {
+      karaoke_audio_url = audioMatch[1];
+    } else {
+      const ytMatch = rawMarkdown.match(/(https?:\/\/(?:www\.)?(?:youtube\.com\/watch\?[^\s)"'<>]*v=[A-Za-z0-9_-]{11}|youtu\.be\/[A-Za-z0-9_-]{11}))/i);
+      if (ytMatch) karaoke_audio_url = ytMatch[1];
+    }
 
     let body = rawMarkdown;
     const contentIdx = body.indexOf("Markdown Content:");
@@ -190,7 +392,6 @@ window.CarolSongbook = (function () {
 
   async function fetchFromUrl(url) {
     const creds = window.getSupabaseCredentials();
-    // 1. Try Supabase Edge Function first if Supabase is configured
     if (creds.url && creds.anonKey) {
       try {
         const resp = await fetch(`${creds.url}/functions/v1/madely-lyrics`, {
@@ -215,7 +416,6 @@ window.CarolSongbook = (function () {
       } catch (e) {}
     }
 
-    // 2. Fallback to CORS-friendly reader proxy
     const resp = await fetch(`https://r.jina.ai/${url}`, { headers: { Accept: "text/plain" } });
     if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
     const raw = await resp.text();
