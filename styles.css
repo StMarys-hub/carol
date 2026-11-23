@@ -1136,22 +1136,30 @@ body {
   color: #000000;
   border-color: var(--accent-amber);
 }
+#songbook-modal .modal-sheet {
+  max-width: 1040px;
+  padding: 14px clamp(8px, 2vw, 18px);
+}
+
 .song-lyrics-box {
   background: #000000;
   border: 1.5px solid var(--border-subtle);
   border-radius: var(--radius-md);
-  padding: 16px;
+  padding: 12px clamp(8px, 2.2vw, 16px);
   font-size: 1.08rem;
   line-height: 1.7;
   color: #f8fafc;
   white-space: pre-line;
+  word-break: break-word;
 }
 
 .add-song-panel {
   display: none;
-  margin-top: 14px;
-  padding-top: 14px;
-  border-top: 1px solid var(--border-subtle);
+  margin-bottom: 14px;
+  padding: 12px;
+  background: var(--bg-surface-elevated);
+  border: 1.5px solid var(--border-strong);
+  border-radius: var(--radius-md);
 }
 .add-song-panel.open {
   display: block;
