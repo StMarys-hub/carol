@@ -73,11 +73,29 @@ DECLARE
   v_role text;
   v_ward text := upper(trim(p_ward_id));
   v_id uuid := NULLIF(p_house->>'id', '')::uuid;
+  v_season_id uuid;
+  v_fam text := trim(coalesce(p_house->>'family_name', ''));
+  v_addr text := trim(coalesce(p_house->>'address', ''));
 BEGIN
   v_role := public._assert_ward_admin(v_ward, p_admin_code);
+  SELECT season_id INTO v_season_id FROM public.ward_houses WHERE id = v_id AND ward_id = v_ward;
+
+  IF v_season_id IS NOT NULL AND EXISTS (
+    SELECT 1 FROM public.ward_houses
+    WHERE ward_id = v_ward
+      AND season_id = v_season_id
+      AND id <> v_id
+      AND (
+        regexp_replace(lower(family_name), '[^a-z0-9]', '', 'g') = regexp_replace(lower(v_fam), '[^a-z0-9]', '', 'g')
+        OR regexp_replace(lower(address), '[^a-z0-9]', '', 'g') = regexp_replace(lower(v_addr), '[^a-z0-9]', '', 'g')
+      )
+  ) THEN
+    RETURN jsonb_build_object('ok', false, 'error', 'DUPLICATE_FAMILY_OR_ADDRESS');
+  END IF;
+
   UPDATE public.ward_houses
-  SET family_name = coalesce(nullif(trim(p_house->>'family_name'), ''), family_name),
-      address = coalesce(nullif(trim(p_house->>'address'), ''), address),
+  SET family_name = coalesce(nullif(v_fam, ''), family_name),
+      address = coalesce(nullif(v_addr, ''), address),
       phone = coalesce(p_house->>'phone', phone),
       notes = coalesce(p_house->>'notes', notes),
       stop_role = CASE WHEN upper(coalesce(p_house->>'stop_role','')) IN ('START','END') THEN upper(p_house->>'stop_role') ELSE NULL END,

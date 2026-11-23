@@ -979,6 +979,32 @@ function sendHostHeadsUp(family, etaStr) {
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
 
+// ---------- Duplicate Family Name / Address Guard ----------
+
+function normalizeDupKey(str) {
+  return String(str || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]/g, "")
+    .trim();
+}
+
+function findDuplicateHouse(familyName, address, excludeHouseId = null, excludedDayIds = []) {
+  const fKey = normalizeDupKey(familyName);
+  const aKey = normalizeDupKey(address);
+  const all = (wardPayload && wardPayload.ward_houses) || [];
+  for (const h of all) {
+    if (excludeHouseId && h.id === excludeHouseId) continue;
+    if (excludedDayIds && excludedDayIds.includes(h.carol_day_id)) continue;
+    if (fKey && normalizeDupKey(h.family_name) === fKey) {
+      return { field: "Family Name", existing: h };
+    }
+    if (aKey && normalizeDupKey(h.address) === aKey) {
+      return { field: "Address", existing: h };
+    }
+  }
+  return null;
+}
+
 // ---------- Add Unplanned New House (Shortest Detour + Optional Supabase Sync) ----------
 
 function openAddHouseModal() {
@@ -1005,6 +1031,14 @@ async function submitNewHouse() {
     statusEl.textContent = "Enter both Family Name and Street Address.";
     return;
   }
+
+  const dup = findDuplicateHouse(family_name, address);
+  if (dup) {
+    statusEl.style.color = "var(--accent-crimson-soft)";
+    statusEl.textContent = `Duplicate ${dup.field}: "${dup.existing.family_name}" is already in this ward's schedule.`;
+    return;
+  }
+  statusEl.style.color = "var(--accent-sky)";
 
   btn.disabled = true;
   btn.textContent = "Calculating...";
@@ -1477,8 +1511,39 @@ async function promptAddNewDay() {
 function previewBulkImport() {
   const raw = document.getElementById("imp-textarea").value;
   const defaultDay = document.getElementById("imp-default-day").value || "Day 1";
+  const replaceDay = document.getElementById("imp-replace-day").checked;
   const parsed = window.CarolOptimizer.parseBulkDelimited(raw, defaultDay);
-  parsedImportRows = parsed.rows;
+
+  // Deduplicate within paste AND against existing houses (unless those days are being replaced)
+  const existingDays = getDays();
+  const replacedDayIds = replaceDay
+    ? existingDays
+        .filter((d) =>
+          parsed.rows.some((r) => d.label.toLowerCase().startsWith(r.day_label.toLowerCase()))
+        )
+        .map((d) => d.id)
+    : [];
+
+  const seenFam = new Set();
+  const seenAddr = new Set();
+  const uniqueRows = [];
+  let skippedDupes = 0;
+
+  for (const r of parsed.rows) {
+    const fKey = normalizeDupKey(r.family_name);
+    const aKey = normalizeDupKey(r.address);
+    const inPasteDup = (fKey && seenFam.has(fKey)) || (aKey && seenAddr.has(aKey));
+    const inDbDup = findDuplicateHouse(r.family_name, r.address, null, replacedDayIds);
+    if (inPasteDup || inDbDup) {
+      skippedDupes++;
+      continue;
+    }
+    if (fKey) seenFam.add(fKey);
+    if (aKey) seenAddr.add(aKey);
+    uniqueRows.push(r);
+  }
+
+  parsedImportRows = uniqueRows;
   const wrap = document.getElementById("imp-preview-wrap");
   const status = document.getElementById("imp-status");
   const saveBtn = document.getElementById("btn-geocode-save-import");
@@ -1486,11 +1551,16 @@ function previewBulkImport() {
   if (!parsedImportRows.length) {
     wrap.style.display = "none";
     saveBtn.disabled = true;
-    status.textContent = "No valid rows found. Tap ? for sample format.";
+    status.textContent = skippedDupes
+      ? `All ${skippedDupes} row(s) were duplicates of existing families/addresses. Check "Replace existing houses" if re-importing.`
+      : "No valid rows found. Tap ? Sample Format for help.";
     return;
   }
 
-  status.textContent = `Detected "${parsed.delimiter === "\t" ? "TAB" : parsed.delimiter}" delimiter • ${parsedImportRows.length} families ready to review & geocode.`;
+  status.textContent =
+    `Detected "${parsed.delimiter === "\t" ? "TAB" : parsed.delimiter}" • ${parsedImportRows.length} unique families ready` +
+    (skippedDupes ? ` (skipped ${skippedDupes} duplicate family/address)` : "") +
+    ".";
   saveBtn.disabled = false;
   wrap.style.display = "block";
   wrap.innerHTML = `
@@ -1654,7 +1724,11 @@ async function saveEditedHouse() {
 
   if (!family_name || !address) return showToast("Family name & address required");
 
-  // Re-geocode if address changed
+  const dup = findDuplicateHouse(family_name, address, id);
+  if (dup) {
+    return showToast(`Duplicate ${dup.field}: already used by ${dup.existing.family_name}`);
+  }
+
   const existing = (wardPayload.ward_houses || []).find((x) => x.id === id);
   let lat = existing ? existing.lat : null;
   let lng = existing ? existing.lng : null;
@@ -1666,35 +1740,84 @@ async function saveEditedHouse() {
     }
   }
 
-  const { data } = await sbClient.rpc("admin_upsert_single_house", {
+  const { data, error } = await sbClient.rpc("admin_upsert_single_house", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code,
     p_house: { id, family_name, address, stop_role, visit_mins, phone, notes, lat, lng }
   });
-  if (data && data.ok) {
+
+  if (!error && data && data.ok) {
     closeModal("edit-house-modal");
     await syncActiveWardOnline(true);
     populateAdminControls();
     showToast(`Saved ${family_name}`);
-  } else {
-    showToast(`Save failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+    return;
   }
+
+  // Automatic fallback using already-deployed admin_bulk_save_houses (replace day)
+  if (existing && wardPayload.active_season) {
+    const updatedDayHouses = getDayHouses(existing.carol_day_id).map((h) =>
+      h.id === id ? { ...h, family_name, address, stop_role, visit_mins, phone, notes, lat, lng } : h
+    );
+    const { data: fbData, error: fbErr } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: existing.carol_day_id,
+      p_houses: updatedDayHouses,
+      p_replace_day: true
+    });
+    if (!fbErr && fbData && fbData.ok) {
+      closeModal("edit-house-modal");
+      await syncActiveWardOnline(true);
+      populateAdminControls();
+      showToast(`Saved ${family_name}`);
+      return;
+    }
+  }
+
+  showToast(`Save failed: ${(data && data.error) || (error && error.message) || "Error"}`);
 }
 
 async function deleteSingleHouse(houseId, familyName) {
   if (!window.confirm(`Delete "${familyName}" from this carol day?`)) return;
-  const { data } = await sbClient.rpc("admin_delete_house", {
+  const existing = (wardPayload.ward_houses || []).find((x) => x.id === houseId);
+
+  const { data, error } = await sbClient.rpc("admin_delete_house", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code,
     p_house_id: houseId
   });
-  if (data && data.ok) {
+
+  if (!error && data && data.ok) {
     await syncActiveWardOnline(true);
     populateAdminControls();
     showToast(`Deleted ${familyName}`);
-  } else {
-    showToast(`Delete failed: ${data ? data.error : "Run migration 006 in Supabase"}`);
+    return;
   }
+
+  // Automatic fallback using already-deployed admin_bulk_save_houses (replace day)
+  if (existing && wardPayload.active_season) {
+    const remaining = window.CarolOptimizer.recomputeLegEstimates(
+      getDayHouses(existing.carol_day_id).filter((h) => h.id !== houseId)
+    );
+    const { data: fbData, error: fbErr } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: existing.carol_day_id,
+      p_houses: remaining,
+      p_replace_day: true
+    });
+    if (!fbErr && fbData && fbData.ok) {
+      await syncActiveWardOnline(true);
+      populateAdminControls();
+      showToast(`Deleted ${familyName}`);
+      return;
+    }
+  }
+
+  showToast(`Delete failed: ${(data && data.error) || (error && error.message) || "Error"}`);
 }
 
 function moveOptDraft(idx, delta) {

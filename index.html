@@ -14,7 +14,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=2" />
+  <link rel="stylesheet" href="./styles.css?v=3" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -31,13 +31,6 @@
           </div>
         </div>
         <div class="header-actions">
-          <select id="ward-switcher" class="ward-pill" aria-label="Switch Ward" onchange="switchWard(this.value)">
-            <option value="W1">W1</option>
-            <option value="W2">W2</option>
-            <option value="W3">W3</option>
-            <option value="W4" selected>W4</option>
-            <option value="W5">W5</option>
-          </select>
           <button class="icon-btn" onclick="openSongbookModal()" title="Carol Songbook" aria-label="Carol Songbook">🎵</button>
           <button id="btn-theme" class="icon-btn" onclick="toggleTheme()" title="Night / Snow Theme" aria-label="Toggle Theme">🌙</button>
           <button id="btn-large-print" class="icon-btn" onclick="toggleLargePrint()" title="Large Print" aria-label="Large Print">Aa+</button>
@@ -589,9 +582,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=2" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=2" charset="UTF-8"></script>
-  <script src="./songbook.js?v=2" charset="UTF-8"></script>
-  <script src="./app.js?v=2" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=3" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=3" charset="UTF-8"></script>
+  <script src="./songbook.js?v=3" charset="UTF-8"></script>
+  <script src="./app.js?v=3" charset="UTF-8"></script>
 </body>
 </html>
