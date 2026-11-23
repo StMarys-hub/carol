@@ -356,6 +356,23 @@ function subscribeRealtime() {
         render();
       }
     })
+    .on("broadcast", { event: "songs_updated" }, async (payload) => {
+      const p = payload && payload.payload;
+      if (!p || p.ward_id !== activeWardId) return;
+      await syncActiveWardOnline(true);
+      if (document.getElementById("songbook-modal").classList.contains("open")) {
+        renderCurrentSongbook();
+      }
+      showToast("🎵 Ward Songbook updated!");
+    })
+    .on("broadcast", { event: "song_submitted" }, (payload) => {
+      const p = payload && payload.payload;
+      if (!p || p.ward_id !== activeWardId) return;
+      if (adminSession.unlocked && adminSession.wardId === activeWardId) {
+        loadPendingSongs();
+        showToast(`🎵 New song pending approval: "${p.title || "Song"}"`);
+      }
+    })
     .subscribe();
 }
 
@@ -1282,7 +1299,20 @@ function closeSongbookModal() {
 }
 
 function toggleAddSongPanel() {
-  document.getElementById("add-song-panel").classList.toggle("open");
+  const panel = document.getElementById("add-song-panel");
+  panel.classList.toggle("open");
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  const noteEl = document.getElementById("song-submit-note");
+  const btnEl = document.getElementById("btn-save-song");
+  if (noteEl && btnEl) {
+    if (isAdmin) {
+      noteEl.textContent = "Admin mode: Song will be published immediately to all ward members.";
+      btnEl.textContent = "💾 Save & Sync to Ward";
+    } else {
+      noteEl.textContent = "Submitted songs are sent to your Ward Coordinator for quick approval before syncing to everyone.";
+      btnEl.textContent = "📤 Submit for Coordinator Approval";
+    }
+  }
 }
 
 async function fetchLyricsFromUrl() {
@@ -1324,9 +1354,13 @@ async function saveNewSong() {
   const lyrics = document.getElementById("new-song-lyrics").value.trim();
   const karaoke_audio_url = document.getElementById("new-song-audio").value.trim();
   const source_url = document.getElementById("new-song-url").value.trim();
+  const submitted_by = (document.getElementById("new-song-submitter")?.value || "").trim() || "Ward Member";
   if (!title || !lyrics) return showToast("Enter both title and lyrics");
 
-  if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  const cachedUserCode = localStorage.getItem(keyUserCode(activeWardId));
+
+  if (isAdmin && sbClient) {
     const { data } = await sbClient.rpc("admin_save_song", {
       p_ward_id: activeWardId,
       p_admin_code: adminSession.code,
@@ -1334,22 +1368,46 @@ async function saveNewSong() {
     });
     if (data && data.ok) {
       await syncActiveWardOnline(true);
+      if (realtimeChannel) {
+        realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
+      }
+      const all = getCombinedSongs();
+      window.CarolSongbook.setActiveIdx(all.length - 1);
+      renderCurrentSongbook();
+      showToast(`Published "${title}" to all ward members!`);
+    } else {
+      return showToast(`Save failed: ${(data && data.error) || "Error"}`);
+    }
+  } else if (sbClient && cachedUserCode) {
+    const { data, error } = await sbClient.rpc("submit_ward_song", {
+      p_ward_id: activeWardId,
+      p_user_code: cachedUserCode,
+      p_song: { title, lang: "Custom", lyrics, karaoke_audio_url, source_url, submitted_by }
+    });
+    if (!error && data && data.ok) {
+      if (realtimeChannel) {
+        realtimeChannel.send({ type: "broadcast", event: "song_submitted", payload: { ward_id: activeWardId, title } });
+      }
+      showToast(`✓ "${title}" sent to Ward Coordinator for approval!`);
+    } else {
+      return showToast("Submit failed — run migration 007 in Supabase SQL Editor.");
     }
   } else {
     const localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
     localSongs.push({ id: `local-song-${Date.now()}`, title, lang: "Custom", lyrics, karaoke_audio_url, source_url, localOnly: true });
     localStorage.setItem(keyLocalSongs(activeWardId), JSON.stringify(localSongs));
+    const all = getCombinedSongs();
+    window.CarolSongbook.setActiveIdx(all.length - 1);
+    renderCurrentSongbook();
+    showToast(`Saved "${title}" locally`);
   }
 
   document.getElementById("new-song-url").value = "";
   document.getElementById("new-song-title").value = "";
   document.getElementById("new-song-audio").value = "";
   document.getElementById("new-song-lyrics").value = "";
+  if (document.getElementById("new-song-submitter")) document.getElementById("new-song-submitter").value = "";
   document.getElementById("add-song-panel").classList.remove("open");
-  const all = getCombinedSongs();
-  window.CarolSongbook.setActiveIdx(all.length - 1);
-  renderCurrentSongbook();
-  showToast(`Saved "${title}" to Songbook!`);
 }
 
 async function deleteCurrentSong() {
@@ -1367,10 +1425,64 @@ async function deleteCurrentSong() {
       p_song_id: cur.id
     });
     await syncActiveWardOnline(true);
+    if (realtimeChannel) {
+      realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
+    }
   }
   window.CarolSongbook.setActiveIdx(0);
   renderCurrentSongbook();
   showToast(`Deleted "${cur.title}"`);
+}
+
+async function loadPendingSongs() {
+  const el = document.getElementById("admin-pending-songs-list");
+  if (!el || !adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient) return;
+  const { data, error } = await sbClient.rpc("admin_list_pending_songs", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code
+  });
+  if (error || !data || !data.ok) {
+    el.innerHTML = `<p class="helper-text">Run migration 007 in Supabase to enable member song approvals.</p>`;
+    return;
+  }
+  const list = data.pending_songs || [];
+  if (!list.length) {
+    el.innerHTML = `<p class="helper-text">No pending song requests from ward members.</p>`;
+    return;
+  }
+  el.innerHTML = list
+    .map(
+      (s) => `
+      <div class="admin-item-row">
+        <div class="admin-item-main">
+          <div class="admin-item-name">🎵 ${escapeHtml(s.title)}</div>
+          <div class="admin-item-sub">By ${escapeHtml(s.submitted_by || "Ward Member")} • ${escapeHtml((s.lyrics || "").slice(0, 75))}...</div>
+        </div>
+        <div class="admin-item-btns">
+          <button class="mini-btn mint" onclick="approveOrRejectSong('${s.id}', true, '${escapeJs(s.title)}')">✅ Approve &amp; Share</button>
+          <button class="mini-btn danger" onclick="approveOrRejectSong('${s.id}', false, '${escapeJs(s.title)}')">❌ Reject</button>
+        </div>
+      </div>
+    `
+    )
+    .join("");
+}
+
+async function approveOrRejectSong(songId, approve, title) {
+  const { data } = await sbClient.rpc("admin_approve_song", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_song_id: songId,
+    p_approve: approve
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    await loadPendingSongs();
+    if (approve && realtimeChannel) {
+      realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
+    }
+    showToast(approve ? `✅ Approved "${title}" — synced to all ward members!` : `Rejected "${title}"`);
+  }
 }
 
 // ---------- Ward Admin Portal (4 Tabs) ----------
@@ -1439,6 +1551,7 @@ function populateAdminControls() {
 
   renderOptimizerList();
   renderAdminSeasonsAndDays();
+  loadPendingSongs();
 }
 
 function renderAdminSeasonsAndDays() {
