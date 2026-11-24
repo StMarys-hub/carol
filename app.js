@@ -690,8 +690,13 @@ function toggleMapFullscreen() {
     btn.title = mapFullscreen ? "Restore Map" : "Full Screen Map";
     btn.classList.toggle("active", mapFullscreen);
   }
-  rerenderRouteMapOnly();
+  // Wait 1 frame so flexbox lays out the full-screen viewport before measuring W x H
+  requestAnimationFrame(() => rerenderRouteMapOnly());
 }
+
+window.addEventListener("resize", () => {
+  if (snapshotOpen || mapFullscreen) rerenderRouteMapOnly();
+});
 
 function toggleMapLabels() {
   mapShowLabels = !mapShowLabels;
@@ -729,9 +734,11 @@ function rerenderRouteMapOnly() {
     mapPanX = 0;
     mapPanY = 0;
   }
-  const maxPan = (mapZoom - 1) * 190;
-  mapPanX = Math.max(-maxPan, Math.min(maxPan, mapPanX));
-  mapPanY = Math.max(-maxPan, Math.min(maxPan, mapPanY));
+  const vp = document.getElementById("route-svg-viewport");
+  const maxPanX = (mapZoom - 1) * ((vp && vp.clientWidth) || 380) * 0.55;
+  const maxPanY = (mapZoom - 1) * ((vp && vp.clientHeight) || 320) * 0.55;
+  mapPanX = Math.max(-maxPanX, Math.min(maxPanX, mapPanX));
+  mapPanY = Math.max(-maxPanY, Math.min(maxPanY, mapPanY));
   el.style.transform = "";
   el.innerHTML = renderOfflineRouteSvg(lastMapRenderArgs.computed, lastMapRenderArgs.nextIndex);
 }
@@ -808,12 +815,20 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   const minLng = Math.min(...lngs);
   const maxLng = Math.max(...lngs);
   const cosLat = Math.cos(((minLat + maxLat) / 2) * (Math.PI / 180));
-  const W = 380;
-  const H = 220;
-  const pad = 26;
+
+  // Measure real viewport dimensions so Full Screen & mobile use 100% of canvas with ZERO aspect-ratio distortion
+  const vpEl = document.getElementById("route-svg-viewport");
+  const measuredW = vpEl && vpEl.clientWidth > 120 ? vpEl.clientWidth : 380;
+  const measuredH = mapFullscreen
+    ? Math.max(320, (vpEl && vpEl.clientHeight > 180 ? vpEl.clientHeight : window.innerHeight - 110))
+    : Math.max(230, Math.min(300, Math.round(measuredW * 0.62)));
+  const W = measuredW;
+  const H = measuredH;
+  const pad = 28;
 
   const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
   const spanLat = Math.max(maxLat - minLat, 0.005);
+  // Uniform scale preserves exact geographic aspect ratio on both portrait & landscape screens
   const baseScale = Math.min((W - pad * 2) / spanLng, (H - pad * 2) / spanLat);
   const offX = (W - spanLng * baseScale) / 2;
   const offY = (H - spanLat * baseScale) / 2;
@@ -926,6 +941,13 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   }
 
   let activePinsSvg = "";
+  let labelsSvg = "";
+  const placedBoxes = []; // Track placed label boxes for 8-direction collision avoidance
+
+  function boxesOverlap(a, b) {
+    return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
+  }
+
   computed.forEach((s, idx) => {
     const p = projected[idx];
     if (!p) return;
@@ -950,9 +972,66 @@ function renderOfflineRouteSvg(computed, nextIndex) {
         ${isCur ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15.5" fill="rgba(245,158,11,0.3)" />` : ""}
         <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11.2 : 9.6}" fill="${fill}" stroke="${stroke}" stroke-width="2" />
         <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${isCur ? "#000" : "#FFF"}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
-        ${mapShowLabels ? `<text x="${(p.x + 13).toFixed(1)}" y="${(p.y + 3).toFixed(1)}" fill="${isLight ? "#0F172A" : "#F8FAFC"}" font-size="8.2" font-weight="800" font-family="sans-serif">${escapeHtml((s.family_name || "").split(/[&,]/)[0].trim())}</text>` : ""}
       </g>
     `;
+
+    // Smart 8-Position Collision-Avoiding Label Placement
+    if (mapShowLabels && p.x > -30 && p.x < W + 30 && p.y > -20 && p.y < H + 20) {
+      const shortLabel = (s.family_name || "").replace(/\s+and\s+/i, " & ").trim();
+      const lw = Math.min(130, Math.max(36, shortLabel.length * 5.2 + 8));
+      const lh = 14;
+      const rOff = 14;
+
+      const candidates = [
+        { tx: p.x + rOff, ty: p.y + 3, anchor: "start", x1: p.x + rOff - 2, y1: p.y - 7 },            // Right
+        { tx: p.x - rOff, ty: p.y + 3, anchor: "end", x1: p.x - rOff - lw + 2, y1: p.y - 7 },         // Left
+        { tx: p.x, ty: p.y - rOff - 2, anchor: "middle", x1: p.x - lw / 2, y1: p.y - rOff - lh },     // Top
+        { tx: p.x, ty: p.y + rOff + 9, anchor: "middle", x1: p.x - lw / 2, y1: p.y + rOff - 1 },      // Bottom
+        { tx: p.x + rOff, ty: p.y - 11, anchor: "start", x1: p.x + rOff - 2, y1: p.y - 21 },          // Top-Right
+        { tx: p.x + rOff, ty: p.y + 17, anchor: "start", x1: p.x + rOff - 2, y1: p.y + 7 },           // Bottom-Right
+        { tx: p.x - rOff, ty: p.y - 11, anchor: "end", x1: p.x - rOff - lw + 2, y1: p.y - 21 },       // Top-Left
+        { tx: p.x - rOff, ty: p.y + 17, anchor: "end", x1: p.x - rOff - lw + 2, y1: p.y + 7 }         // Bottom-Left
+      ];
+
+      let bestCand = candidates[0];
+      let bestScore = Infinity;
+
+      for (const c of candidates) {
+        const box = { x1: c.x1, y1: c.y1, x2: c.x1 + lw, y2: c.y1 + lh };
+        let score = 0;
+
+        // Penalize going off-canvas
+        if (box.x1 < 4) score += 40;
+        if (box.x2 > W - 44) score += 40; // avoid right zoom toolbar
+        if (box.y1 < 4 || box.y2 > H - 4) score += 40;
+
+        // Heavy penalty for overlapping any already-placed label
+        for (const pb of placedBoxes) {
+          if (boxesOverlap(box, pb)) score += 100;
+        }
+        // Heavy penalty for overlapping any active pin circle
+        for (const op of valid) {
+          const pinBox = { x1: op.x - 11, y1: op.y - 11, x2: op.x + 11, y2: op.y + 11 };
+          if (boxesOverlap(box, pinBox)) score += 80;
+        }
+
+        if (score < bestScore) {
+          bestScore = score;
+          bestCand = { ...c, box };
+        }
+      }
+
+      placedBoxes.push(bestCand.box);
+      const pillBg = isLight ? "rgba(248,250,252,0.88)" : "rgba(4,14,11,0.84)";
+      const pillBorder = isLight ? "rgba(100,116,139,0.45)" : "rgba(56,189,248,0.4)";
+      const txtCol = isLight ? "#0F172A" : "#F8FAFC";
+      labelsSvg += `
+        <g style="pointer-events:none;">
+          <rect x="${bestCand.box.x1.toFixed(1)}" y="${bestCand.box.y1.toFixed(1)}" width="${lw.toFixed(1)}" height="${lh}" rx="4" fill="${pillBg}" stroke="${pillBorder}" stroke-width="0.8" />
+          <text x="${bestCand.tx.toFixed(1)}" y="${bestCand.ty.toFixed(1)}" text-anchor="${bestCand.anchor}" fill="${txtCol}" font-size="8.4" font-weight="800" font-family="sans-serif">${escapeHtml(shortLabel)}</text>
+        </g>
+      `;
+    }
   });
 
   // Live "You Are Here" blue pulsing GPS dot when Near Me is active
@@ -968,7 +1047,7 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     `;
   }
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:${mapFullscreen ? "100%" : "240px"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}${userDotSvg}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}${labelsSvg}${userDotSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
