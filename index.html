@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=13" />
+  <link rel="stylesheet" href="./styles.css?v=17" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -122,9 +122,16 @@
         </button>
         <div class="snapshot-body">
           <div class="route-svg-wrap">
-            <div id="route-svg-container"></div>
+            <div class="map-zoom-controls" aria-label="Map zoom controls">
+              <button class="map-zoom-btn" onclick="zoomRouteMap(0.4)" title="Zoom In" aria-label="Zoom In">＋</button>
+              <button class="map-zoom-btn" onclick="zoomRouteMap(-0.4)" title="Zoom Out" aria-label="Zoom Out">－</button>
+              <button class="map-zoom-btn" onclick="resetRouteMapZoom()" title="Reset Zoom" aria-label="Reset Zoom" style="font-size:0.78rem;">↺</button>
+            </div>
+            <div id="route-svg-viewport" class="route-svg-viewport">
+              <div id="route-svg-container" style="transform-origin: center center; transition: transform 0.14s ease;"></div>
+            </div>
             <div class="route-svg-legend">
-              <span>Tap bright pins to jump • Dim pins = other days</span>
+              <span>Tap bright pins to jump • Dim pins = other days • Drag when zoomed</span>
               <span>🟢 Done • 🟡 Current • 🔴 Final</span>
             </div>
           </div>
@@ -636,9 +643,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=16" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=16" charset="UTF-8"></script>
-  <script src="./songbook.js?v=16" charset="UTF-8"></script>
-  <script src="./app.js?v=16" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=17" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=17" charset="UTF-8"></script>
+  <script src="./songbook.js?v=17" charset="UTF-8"></script>
+  <script src="./app.js?v=17" charset="UTF-8"></script>
 </body>
 </html>

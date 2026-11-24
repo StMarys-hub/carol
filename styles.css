@@ -474,11 +474,47 @@ body {
   display: block;
 }
 .route-svg-wrap {
+  position: relative;
   margin-top: 10px;
   background: var(--bg-map);
   border: 1.5px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 6px;
+}
+.route-svg-viewport {
+  overflow: hidden;
+  border-radius: 6px;
+  touch-action: none;
+  cursor: grab;
+}
+.route-svg-viewport:active {
+  cursor: grabbing;
+}
+.map-zoom-controls {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  z-index: 4;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.map-zoom-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  border: 1.5px solid var(--border-strong);
+  font-size: 0.95rem;
+  font-weight: 900;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.35);
+}
+.map-zoom-btn:active {
+  transform: scale(0.94);
 }
 .route-svg-legend {
   display: flex;

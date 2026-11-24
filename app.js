@@ -670,7 +670,74 @@ function getNavUrl(address, lat, lng) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
 }
 
-// ---------- Offline Multi-Day SVG Route Map (Other Days Dimmed + Active Day Bright) ----------
+// ---------- Offline Multi-Day SVG Route Map (Zoom + Pan + Other Days Dimmed + Active Day Bright) ----------
+
+let mapZoom = 1;
+let mapPanX = 0;
+let mapPanY = 0;
+let mapDrag = null;
+
+function applyMapTransform() {
+  const el = document.getElementById("route-svg-container");
+  if (!el) return;
+  if (mapZoom <= 1) {
+    mapZoom = 1;
+    mapPanX = 0;
+    mapPanY = 0;
+  }
+  const maxPan = (mapZoom - 1) * 160;
+  mapPanX = Math.max(-maxPan, Math.min(maxPan, mapPanX));
+  mapPanY = Math.max(-maxPan, Math.min(maxPan, mapPanY));
+  el.style.transform = `translate(${mapPanX.toFixed(1)}px, ${mapPanY.toFixed(1)}px) scale(${mapZoom.toFixed(2)})`;
+}
+
+function zoomRouteMap(delta) {
+  mapZoom = Math.max(1, Math.min(3.6, Number((mapZoom + delta).toFixed(2))));
+  applyMapTransform();
+}
+
+function resetRouteMapZoom() {
+  mapZoom = 1;
+  mapPanX = 0;
+  mapPanY = 0;
+  applyMapTransform();
+}
+
+function initRouteMapPanHandlers() {
+  const vp = document.getElementById("route-svg-viewport");
+  if (!vp || vp.dataset.panBound) return;
+  vp.dataset.panBound = "1";
+
+  vp.addEventListener("pointerdown", (e) => {
+    if (mapZoom <= 1) return;
+    mapDrag = { startX: e.clientX, startY: e.clientY, origX: mapPanX, origY: mapPanY };
+    const el = document.getElementById("route-svg-container");
+    if (el) el.style.transition = "none";
+  });
+
+  window.addEventListener("pointermove", (e) => {
+    if (!mapDrag) return;
+    mapPanX = mapDrag.origX + (e.clientX - mapDrag.startX);
+    mapPanY = mapDrag.origY + (e.clientY - mapDrag.startY);
+    applyMapTransform();
+  });
+
+  window.addEventListener("pointerup", () => {
+    if (!mapDrag) return;
+    mapDrag = null;
+    const el = document.getElementById("route-svg-container");
+    if (el) el.style.transition = "transform 0.14s ease";
+  });
+
+  vp.addEventListener(
+    "wheel",
+    (e) => {
+      e.preventDefault();
+      zoomRouteMap(e.deltaY < 0 ? 0.25 : -0.25);
+    },
+    { passive: false }
+  );
+}
 
 function renderOfflineRouteSvg(computed, nextIndex) {
   const days = getDays();
@@ -1052,6 +1119,8 @@ function render() {
   // Snapshot Map + Chunked Multi-Stop Google Maps Legs
   document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
   document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, currentStop ? currentStop.index : -1);
+  initRouteMapPanHandlers();
+  applyMapTransform();
   const mapLegs = window.CarolOptimizer.buildChunkedGoogleMapsLegs(computed, 9);
   document.getElementById("snapshot-map-links").innerHTML = mapLegs
     .map((l) => `<a class="map-leg-btn" href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`)
