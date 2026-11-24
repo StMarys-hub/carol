@@ -38,6 +38,18 @@ window.CarolOptimizer = (function () {
    * - Runs Nearest-Neighbor + 2-Opt Local Search over the middle stops
    * - Safely handles 0, 1, or 2 houses
    */
+  function hasValidCoords(h) {
+    return (
+      h &&
+      typeof h.lat === "number" &&
+      typeof h.lng === "number" &&
+      !Number.isNaN(h.lat) &&
+      !Number.isNaN(h.lng) &&
+      Math.abs(h.lat) > 0.01 &&
+      Math.abs(h.lng) > 0.01
+    );
+  }
+
   function optimizeDayHouses(houses) {
     if (!Array.isArray(houses) || houses.length <= 2) {
       const copy = (houses || []).map((h) => ({ ...h }));
@@ -64,32 +76,39 @@ window.CarolOptimizer = (function () {
     const eIdx = pool.findIndex((h) => h.stop_role === "END");
     if (eIdx !== -1) endHouse = pool.splice(eIdx, 1)[0];
 
-    // If no explicit START, pick the stop farthest from END (or first stop) as seed
+    // Keep any un-geocoded houses separate so fake fallback distances never corrupt 2-Opt
+    const ungeocoded = [];
+    const geocodedPool = [];
+    for (const h of pool) {
+      if (hasValidCoords(h)) geocodedPool.push(h);
+      else ungeocoded.push(h);
+    }
+
     const ordered = [];
     if (startHouse) {
       ordered.push(startHouse);
-    } else if (pool.length > 0) {
-      ordered.push(pool.shift());
+    } else if (geocodedPool.length > 0) {
+      ordered.push(geocodedPool.shift());
     }
 
-    // Nearest-Neighbor construction
-    while (pool.length > 0) {
+    // Nearest-Neighbor construction over geocoded stops
+    while (geocodedPool.length > 0) {
       const curr = ordered[ordered.length - 1];
       let bestIdx = 0;
       let bestDist = Infinity;
-      for (let i = 0; i < pool.length; i++) {
-        const d = distBetween(curr, pool[i]);
+      for (let i = 0; i < geocodedPool.length; i++) {
+        const d = distBetween(curr, geocodedPool[i]);
         if (d < bestDist) {
           bestDist = d;
           bestIdx = i;
         }
       }
-      ordered.push(pool.splice(bestIdx, 1)[0]);
+      ordered.push(geocodedPool.splice(bestIdx, 1)[0]);
     }
 
     if (endHouse) ordered.push(endHouse);
 
-    // 2-Opt Local Search (only swaps interior indices so START & END stay strictly pinned)
+    // 2-Opt Local Search (only swaps interior geocoded indices so START & END stay strictly pinned)
     const lockStart = startHouse ? 1 : 0;
     const lockEnd = endHouse ? ordered.length - 1 : ordered.length;
     const n = ordered.length;
@@ -112,7 +131,6 @@ window.CarolOptimizer = (function () {
             (nextK ? distBetween(ordered[i], nextK) : 0);
 
           if (after + 0.001 < before) {
-            // Reverse segment [i..k]
             let left = i;
             let right = k;
             while (left < right) {
@@ -124,6 +142,12 @@ window.CarolOptimizer = (function () {
           }
         }
       }
+    }
+
+    // Place any un-geocoded stops right before END (never falsely jammed into #2)
+    if (ungeocoded.length > 0) {
+      const insertAt = endHouse ? ordered.length - 1 : ordered.length;
+      ordered.splice(insertAt, 0, ...ungeocoded);
     }
 
     return recomputeLegEstimates(ordered);
@@ -292,21 +316,53 @@ window.CarolOptimizer = (function () {
     return { delimiter: delim, rows };
   }
 
+  function cleanAddressForGeocode(address) {
+    return String(address || "")
+      .replace(/^(\d+)\s*,\s*/, "$1 ")          // "509, Alucio Ct" -> "509 Alucio Ct"
+      .replace(/,\s*(united states|usa)\s*$/i, "")
+      .replace(/\s*,\s*/g, ", ")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+  }
+
   /**
-   * Polite throttled Nominatim geocoder (1 req/sec) for one-time Admin save
+   * High-accuracy browser-safe Geocoder:
+   * 1. ArcGIS World Geocoder (CORS-enabled, rooftop accuracy on new subdivisions)
+   * 2. OpenStreetMap Nominatim fallback
    */
   async function geocodeAddress(address) {
     if (!address) return null;
-    const q = /nc|north carolina|\d{5}/i.test(address) ? address : `${address}, Charlotte, NC`;
+    const cleaned = cleanAddressForGeocode(address);
+    const q = /nc|north carolina|\d{5}/i.test(cleaned) ? cleaned : `${cleaned}, Charlotte, NC`;
+
+    // 1. ArcGIS World Geocoder (fast, free single-line lookup, CORS supported)
+    try {
+      const arcUrl = `https://geocode.arcgis.com/arcgis/rest/services/World/GeocodeServer/findAddressCandidates?f=json&maxLocations=1&SingleLine=${encodeURIComponent(q)}`;
+      const resp = await fetch(arcUrl);
+      if (resp.ok) {
+        const data = await resp.json();
+        const best = data && Array.isArray(data.candidates) ? data.candidates[0] : null;
+        if (best && best.score >= 75 && best.location) {
+          return {
+            lat: Number(best.location.y.toFixed(6)),
+            lng: Number(best.location.x.toFixed(6))
+          };
+        }
+      }
+    } catch (e) {}
+
+    // 2. Nominatim fallback
     try {
       const url = `https://nominatim.openstreetmap.org/search?format=json&limit=1&q=${encodeURIComponent(q)}`;
       const resp = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!resp.ok) return null;
-      const data = await resp.json();
-      if (Array.isArray(data) && data.length > 0) {
-        return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data) && data.length > 0) {
+          return { lat: parseFloat(data[0].lat), lng: parseFloat(data[0].lon) };
+        }
       }
     } catch (e) {}
+
     return null;
   }
 

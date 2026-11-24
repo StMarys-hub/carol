@@ -659,23 +659,39 @@ function getNavUrl(address, lat, lng) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encoded}&travelmode=driving`;
 }
 
-// ---------- Offline SVG Route Map ----------
+// ---------- Offline Multi-Day SVG Route Map (Other Days Dimmed + Active Day Bright) ----------
 
 function renderOfflineRouteSvg(computed, nextIndex) {
-  const pts = computed.filter((s) => typeof s.lat === "number" && typeof s.lng === "number");
-  if (pts.length < 2) {
+  const days = getDays();
+  const otherDayGroups = days
+    .filter((d) => d.id !== activeDayId)
+    .map((d) => ({
+      day: d,
+      houses: getDayHouses(d.id).filter(
+        (h) => typeof h.lat === "number" && typeof h.lng === "number" && !Number.isNaN(h.lat) && !Number.isNaN(h.lng)
+      )
+    }))
+    .filter((g) => g.houses.length > 0);
+
+  const activePts = computed.filter(
+    (s) => typeof s.lat === "number" && typeof s.lng === "number" && !Number.isNaN(s.lat) && !Number.isNaN(s.lng)
+  );
+  const allPts = [...activePts, ...otherDayGroups.flatMap((g) => g.houses)];
+
+  if (allPts.length < 2) {
     return `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.8rem;">Add geocoded coordinates in Admin to preview the offline map.</div>`;
   }
-  const lats = pts.map((p) => p.lat);
-  const lngs = pts.map((p) => p.lng);
+
+  const lats = allPts.map((p) => p.lat);
+  const lngs = allPts.map((p) => p.lng);
   const minLat = Math.min(...lats);
   const maxLat = Math.max(...lats);
   const minLng = Math.min(...lngs);
   const maxLng = Math.max(...lngs);
   const cosLat = Math.cos(((minLat + maxLat) / 2) * (Math.PI / 180));
-  const W = 360;
-  const H = 195;
-  const pad = 24;
+  const W = 380;
+  const H = 220;
+  const pad = 26;
 
   const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
   const spanLat = Math.max(maxLat - minLat, 0.005);
@@ -683,57 +699,89 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   const offX = (W - spanLng * scale) / 2;
   const offY = (H - spanLat * scale) / 2;
 
+  const project = (lat, lng) => ({
+    x: offX + (lng - minLng) * cosLat * scale,
+    y: H - (offY + (lat - minLat) * scale)
+  });
+
+  // 1. Render OTHER (inactive) carol days underneath in subtle dimmed style
+  let otherDaysSvg = "";
+  const otherColors = ["#64748B", "#475569", "#52525B"];
+  otherDayGroups.forEach((group, gIdx) => {
+    const col = otherColors[gIdx % otherColors.length];
+    const pts = group.houses.map((h) => project(h.lat, h.lng));
+    let segs = "";
+    for (let i = 1; i < pts.length; i++) {
+      segs += `<line x1="${pts[i - 1].x.toFixed(1)}" y1="${pts[i - 1].y.toFixed(1)}" x2="${pts[i].x.toFixed(1)}" y2="${pts[i].y.toFixed(1)}" stroke="${col}" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.45" />`;
+    }
+    let dots = "";
+    pts.forEach((p, idx) => {
+      const h = group.houses[idx];
+      dots += `
+        <g style="cursor:pointer;" opacity="0.42" onclick="switchDay('${group.day.id}')">
+          <title>${escapeHtml(group.day.label)} • #${idx + 1} ${escapeHtml(h.family_name)} (Tap to switch day)</title>
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6.2" fill="#0F172A" stroke="${col}" stroke-width="1.2" />
+          <text x="${p.x.toFixed(1)}" y="${(p.y + 2.4).toFixed(1)}" text-anchor="middle" fill="#94A3B8" font-size="6.8" font-weight="800" font-family="sans-serif">${idx + 1}</text>
+        </g>
+      `;
+    });
+    otherDaysSvg += `<g data-day="${group.day.id}">${segs}${dots}</g>`;
+  });
+
+  // 2. Project & gently de-overlap ACTIVE (selected) day pins so every stop is crisp and bright
   const projected = computed.map((s) =>
-    typeof s.lat === "number" && typeof s.lng === "number"
-      ? { x: offX + (s.lng - minLng) * cosLat * scale, y: H - (offY + (s.lat - minLat) * scale) }
+    typeof s.lat === "number" && typeof s.lng === "number" && !Number.isNaN(s.lat) && !Number.isNaN(s.lng)
+      ? project(s.lat, s.lng)
       : null
   );
 
-  // Light collision repulsion so walkable clusters remain readable
   const valid = projected.filter(Boolean);
-  for (let pass = 0; pass < 8; pass++) {
+  for (let pass = 0; pass < 10; pass++) {
     for (let i = 0; i < valid.length; i++) {
       for (let j = i + 1; j < valid.length; j++) {
         const dx = valid[j].x - valid[i].x;
         const dy = valid[j].y - valid[i].y;
         const d = Math.hypot(dx, dy) || 0.01;
-        if (d < 20) {
-          const push = (20 - d) / 2;
-          valid[i].x = Math.max(14, Math.min(W - 14, valid[i].x - (dx / d) * push));
-          valid[i].y = Math.max(14, Math.min(H - 14, valid[i].y - (dy / d) * push));
-          valid[j].x = Math.max(14, Math.min(W - 14, valid[j].x + (dx / d) * push));
-          valid[j].y = Math.max(14, Math.min(H - 14, valid[j].y + (dy / d) * push));
+        if (d < 21) {
+          const push = (21 - d) / 2;
+          valid[i].x = Math.max(15, Math.min(W - 15, valid[i].x - (dx / d) * push));
+          valid[i].y = Math.max(15, Math.min(H - 15, valid[i].y - (dy / d) * push));
+          valid[j].x = Math.max(15, Math.min(W - 15, valid[j].x + (dx / d) * push));
+          valid[j].y = Math.max(15, Math.min(H - 15, valid[j].y + (dy / d) * push));
         }
       }
     }
   }
 
-  let linesSvg = "";
+  let activeLinesSvg = "";
   for (let i = 1; i < computed.length; i++) {
     const p1 = projected[i - 1];
     const p2 = projected[i];
     if (!p1 || !p2) continue;
     const isWalk = (computed[i].distance_label || "").toLowerCase().includes("walk");
     const isDone = computed[i - 1].visited && computed[i].visited;
-    linesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${isDone ? "#34D399" : isWalk ? "#C084FC" : "#475569"}" stroke-width="2" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+    const stroke = isDone ? "#34D399" : isWalk ? "#C084FC" : "#38BDF8";
+    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="2.5" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
   }
 
-  let pinsSvg = "";
+  let activePinsSvg = "";
   computed.forEach((s, idx) => {
     const p = projected[idx];
     if (!p) return;
     const isCur = idx === nextIndex;
-    const fill = s.visited ? "#065F46" : isCur ? "#F59E0B" : s.isLast ? "#DC2626" : "#0F172A";
-    const stroke = s.visited ? "#34D399" : isCur ? "#FFFFFF" : s.isLast ? "#FCA5A5" : "#94A3B8";
-    pinsSvg += `
+    const fill = s.visited ? "#059669" : isCur ? "#F59E0B" : s.isLast ? "#DC2626" : "#0B251D";
+    const stroke = s.visited ? "#6EE7B7" : isCur ? "#FFFFFF" : s.isLast ? "#FCA5A5" : "#38BDF8";
+    activePinsSvg += `
       <g style="cursor:pointer;" onclick="jumpToStop('${s.id}')">
-        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11 : 9.5}" fill="${fill}" stroke="${stroke}" stroke-width="1.8" />
+        <title>#${idx + 1} ${escapeHtml(s.family_name)} — ${escapeHtml(s.address)}</title>
+        ${isCur ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15.5" fill="rgba(245,158,11,0.28)" />` : ""}
+        <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11.2 : 9.6}" fill="${fill}" stroke="${stroke}" stroke-width="2" />
         <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${isCur ? "#000" : "#FFF"}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
       </g>
     `;
   });
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:215px;" role="img" aria-label="Offline route map">${linesSvg}${pinsSvg}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:240px;" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
@@ -2149,15 +2197,52 @@ function moveOptDraft(idx, delta) {
   drawOptimizerDraft();
 }
 
-function runConstrainedOptimizer() {
+let optimizerHadGeocodeUpdates = false;
+
+async function runConstrainedOptimizer() {
+  optimizerHadGeocodeUpdates = false;
+  // Auto-geocode any house missing lat/lng (e.g., previously added unplanned stops) before 2-Opt
+  const missing = optimizerDraft.filter((h) => typeof h.lat !== "number" || typeof h.lng !== "number" || Number.isNaN(h.lat) || Number.isNaN(h.lng));
+  if (missing.length > 0) {
+    showToast(`Locating ${missing.length} address(es) before sorting...`);
+    for (const h of missing) {
+      const c = await window.CarolOptimizer.geocodeAddress(h.address);
+      if (c) {
+        h.lat = c.lat;
+        h.lng = c.lng;
+        optimizerHadGeocodeUpdates = true;
+      }
+    }
+  }
   optimizerDraft = window.CarolOptimizer.optimizeDayHouses(optimizerDraft);
   drawOptimizerDraft();
-  showToast("Optimized route with START/END pinned!");
+  showToast("Optimized route with START/END pinned! Tap Save Order.");
 }
 
 async function saveOptimizedOrder() {
   const dayId = document.getElementById("opt-day-select").value;
   if (!dayId || !optimizerDraft.length) return;
+
+  // If any missing coordinates were resolved, persist full rows (including lat/lng) via admin_bulk_save_houses
+  if (optimizerHadGeocodeUpdates && wardPayload && wardPayload.active_season) {
+    const { data } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: dayId,
+      p_houses: optimizerDraft,
+      p_replace_day: true
+    });
+    if (data && data.ok) {
+      optimizerHadGeocodeUpdates = false;
+      await syncActiveWardOnline(true);
+      broadcastPiiFreeEtaShift(dayId, 0, new Date().toISOString());
+      populateAdminControls();
+      showToast("Saved optimized route & map coordinates!");
+    }
+    return;
+  }
+
   const { data } = await sbClient.rpc("admin_save_house_order", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code,
