@@ -755,12 +755,26 @@ function resetRouteMapZoom() {
   rerenderRouteMapOnly();
 }
 
+let mapPinch = null;
+let mapRafPending = false;
+
+function scheduleMapRerender() {
+  if (mapRafPending) return;
+  mapRafPending = true;
+  requestAnimationFrame(() => {
+    mapRafPending = false;
+    rerenderRouteMapOnly();
+  });
+}
+
 function initRouteMapPanHandlers() {
   const vp = document.getElementById("route-svg-viewport");
   if (!vp || vp.dataset.panBound) return;
   vp.dataset.panBound = "1";
 
+  // Mouse / single-pointer pan
   vp.addEventListener("pointerdown", (e) => {
+    if (e.pointerType === "touch") return; // handled by touch events for clean pinch + pan
     if (mapZoom <= 1) return;
     mapDrag = { startX: e.clientX, startY: e.clientY, origX: mapPanX, origY: mapPanY };
   });
@@ -769,11 +783,67 @@ function initRouteMapPanHandlers() {
     if (!mapDrag) return;
     mapPanX = mapDrag.origX + (e.clientX - mapDrag.startX);
     mapPanY = mapDrag.origY + (e.clientY - mapDrag.startY);
-    rerenderRouteMapOnly();
+    scheduleMapRerender();
   });
 
   window.addEventListener("pointerup", () => {
     mapDrag = null;
+  });
+
+  // Native Mobile Touch: 2-finger Pinch-to-Zoom + 1-finger Pan
+  vp.addEventListener(
+    "touchstart",
+    (e) => {
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        mapDrag = null;
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        mapPinch = {
+          startDist: Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1,
+          startZoom: mapZoom,
+          startMidX: (t1.clientX + t2.clientX) / 2,
+          startMidY: (t1.clientY + t2.clientY) / 2,
+          origPanX: mapPanX,
+          origPanY: mapPanY
+        };
+      } else if (e.touches.length === 1 && mapZoom > 1) {
+        mapPinch = null;
+        const t = e.touches[0];
+        mapDrag = { startX: t.clientX, startY: t.clientY, origX: mapPanX, origY: mapPanY };
+      }
+    },
+    { passive: false }
+  );
+
+  vp.addEventListener(
+    "touchmove",
+    (e) => {
+      if (e.touches.length === 2 && mapPinch) {
+        e.preventDefault();
+        const t1 = e.touches[0];
+        const t2 = e.touches[1];
+        const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1;
+        const midX = (t1.clientX + t2.clientX) / 2;
+        const midY = (t1.clientY + t2.clientY) / 2;
+        mapZoom = Math.max(1, Math.min(5, Number((mapPinch.startZoom * (dist / mapPinch.startDist)).toFixed(2))));
+        mapPanX = mapPinch.origPanX + (midX - mapPinch.startMidX);
+        mapPanY = mapPinch.origPanY + (midY - mapPinch.startMidY);
+        scheduleMapRerender();
+      } else if (e.touches.length === 1 && mapDrag && mapZoom > 1) {
+        e.preventDefault();
+        const t = e.touches[0];
+        mapPanX = mapDrag.origX + (t.clientX - mapDrag.startX);
+        mapPanY = mapDrag.origY + (t.clientY - mapDrag.startY);
+        scheduleMapRerender();
+      }
+    },
+    { passive: false }
+  );
+
+  vp.addEventListener("touchend", (e) => {
+    if (e.touches.length < 2) mapPinch = null;
+    if (e.touches.length === 0) mapDrag = null;
   });
 
   vp.addEventListener(
