@@ -153,7 +153,34 @@ window.CarolOptimizer = (function () {
     return recomputeLegEstimates(ordered);
   }
 
-  function recomputeLegEstimates(ordered) {
+  /**
+   * Realistic Charlotte suburban traffic multiplier:
+   * - "afternoon" (default carol planning): 1.35x + 2 min light/parking buffer
+   * - "now" (Shift to Now): dynamic based on current local time-of-day traffic
+   */
+  function getTrafficProfile(mode = "afternoon", nowDate = new Date()) {
+    if (mode === "now") {
+      const h = nowDate.getHours() + nowDate.getMinutes() / 60;
+      const day = nowDate.getDay(); // 0=Sun, 6=Sat
+      const isWeekend = day === 0 || day === 6;
+
+      if ((h >= 15.5 && h < 18.75) || (!isWeekend && h >= 7 && h < 9.5)) {
+        return { mult: 1.48, bufferMins: 2, label: "Peak Traffic" };
+      }
+      if (h >= 11.5 && h < 15.5) {
+        return { mult: 1.32, bufferMins: 2, label: "Afternoon Traffic" };
+      }
+      if (h >= 18.75 && h < 21.5) {
+        return { mult: 1.22, bufferMins: 2, label: "Evening Traffic" };
+      }
+      return { mult: 1.1, bufferMins: 1, label: "Light Traffic" };
+    }
+    // Default planning profile: realistic Saturday afternoon / holiday traffic
+    return { mult: 1.35, bufferMins: 2, label: "Afternoon Traffic" };
+  }
+
+  function recomputeLegEstimates(ordered, mode = "afternoon") {
+    const profile = getTrafficProfile(mode);
     return ordered.map((h, idx) => {
       if (idx === 0) {
         return { ...h, stop_order: 0, drive_mins: 0, distance_label: h.distance_label || "Start" };
@@ -170,7 +197,9 @@ window.CarolOptimizer = (function () {
         };
       }
       const roadMi = mi * 1.28;
-      const driveMins = Math.max(2, Math.round(roadMi * 2.3));
+      // Base suburban Charlotte road speed (~26 mph) scaled by afternoon/current traffic + parking buffer
+      const baseMins = roadMi * 2.3;
+      const driveMins = Math.max(3, Math.round(baseMins * profile.mult + profile.bufferMins));
       return {
         ...h,
         stop_order: idx,
@@ -366,7 +395,8 @@ window.CarolOptimizer = (function () {
     return null;
   }
 
-  async function fetchOsrmLeg(fromCoords, toCoords) {
+  async function fetchOsrmLeg(fromCoords, toCoords, mode = "afternoon") {
+    const profile = getTrafficProfile(mode);
     const straightMi = haversineMiles(fromCoords.lat, fromCoords.lng, toCoords.lat, toCoords.lng);
     if (straightMi <= 0.22) {
       const walkMins = Math.max(2, Math.round(straightMi * 20));
@@ -379,17 +409,67 @@ window.CarolOptimizer = (function () {
         const data = await resp.json();
         if (data.routes && data.routes[0]) {
           const mi = data.routes[0].distance / 1609.344;
-          const mins = Math.max(1, Math.round(data.routes[0].duration / 60));
+          const freeFlowMins = data.routes[0].duration / 60;
           if (mi <= 0.25) {
             const walkMins = Math.max(2, Math.round(mi * 20));
             return { drive_mins: walkMins, distance_label: `${walkMins} min walk (${mi.toFixed(2)} mi)` };
           }
-          return { drive_mins: mins, distance_label: `${mi.toFixed(1)} mi drive` };
+          const trafficMins = Math.max(3, Math.round(freeFlowMins * profile.mult + profile.bufferMins));
+          return { drive_mins: trafficMins, distance_label: `${mi.toFixed(1)} mi drive` };
         }
       }
     } catch (e) {}
     const roadMi = straightMi * 1.28;
-    return { drive_mins: Math.max(2, Math.round(roadMi * 2.3)), distance_label: `~${roadMi.toFixed(1)} mi drive` };
+    const estMins = Math.max(3, Math.round(roadMi * 2.3 * profile.mult + profile.bufferMins));
+    return { drive_mins: estMins, distance_label: `~${roadMi.toFixed(1)} mi drive` };
+  }
+
+  /**
+   * Batch-update driving legs for a sequence of stops using real OSRM road routing
+   * adjusted for afternoon ("afternoon") or current time-of-day ("now") traffic.
+   */
+  async function refreshRouteLegsWithTraffic(stops, mode = "now") {
+    const profile = getTrafficProfile(mode);
+    if (!Array.isArray(stops) || stops.length < 2) {
+      return { stops, profile };
+    }
+
+    const allValid = stops.every(hasValidCoords);
+    if (allValid) {
+      try {
+        const coordsStr = stops.map((s) => `${s.lng},${s.lat}`).join(";");
+        const url = `https://router.project-osrm.org/route/v1/driving/${coordsStr}?overview=false`;
+        const resp = await fetch(url);
+        if (resp.ok) {
+          const data = await resp.json();
+          const legs = data.routes && data.routes[0] && data.routes[0].legs;
+          if (Array.isArray(legs) && legs.length === stops.length - 1) {
+            for (let i = 1; i < stops.length; i++) {
+              const leg = legs[i - 1];
+              const mi = leg.distance / 1609.344;
+              const freeFlowMins = leg.duration / 60;
+              if (mi <= 0.25) {
+                const walkMins = Math.max(2, Math.round(mi * 20));
+                stops[i].drive_mins = walkMins;
+                stops[i].distance_label = `${walkMins} min walk (${mi.toFixed(2)} mi)`;
+              } else {
+                stops[i].drive_mins = Math.max(3, Math.round(freeFlowMins * profile.mult + profile.bufferMins));
+                stops[i].distance_label = `${mi.toFixed(1)} mi drive`;
+              }
+            }
+            return { stops, profile };
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Fallback: estimate with traffic profile
+    const est = recomputeLegEstimates(stops, mode);
+    for (let i = 1; i < stops.length; i++) {
+      stops[i].drive_mins = est[i].drive_mins;
+      stops[i].distance_label = est[i].distance_label;
+    }
+    return { stops, profile };
   }
 
   /**
@@ -418,12 +498,14 @@ window.CarolOptimizer = (function () {
 
   return {
     haversineMiles,
+    getTrafficProfile,
     optimizeDayHouses,
     recomputeLegEstimates,
     findBestInsertionSlot,
     parseBulkDelimited,
     geocodeAddress,
     fetchOsrmLeg,
+    refreshRouteLegsWithTraffic,
     buildChunkedGoogleMapsLegs
   };
 })();

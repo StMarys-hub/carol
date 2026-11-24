@@ -1240,13 +1240,19 @@ async function toggleVisited(houseId) {
   }
 }
 
-function shiftScheduleToNow() {
+async function shiftScheduleToNow() {
   const days = getDays();
   const activeDay = days.find((d) => d.id === activeDayId);
   if (!activeDay) return;
   const houses = getDayHouses(activeDay.id);
   const nextIdx = houses.findIndex((h) => !h.visited);
   if (nextIdx === -1) return showToast("All stops completed!");
+
+  showToast("⏱️ Calculating remaining drive times for current traffic...");
+
+  // Recalculate remaining legs from the current stop onward using current time-of-day traffic
+  const remainingSlice = houses.slice(Math.max(0, nextIdx));
+  const { profile } = await window.CarolOptimizer.refreshRouteLegsWithTraffic(remainingSlice, "now");
 
   const now = new Date();
   const nowMins = now.getHours() * 60 + now.getMinutes();
@@ -1261,7 +1267,7 @@ function shiftScheduleToNow() {
   activeDay.start_time = `${String(Math.floor(adjusted / 60)).padStart(2, "0")}:${String(adjusted % 60).padStart(2, "0")}`;
   localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
   render();
-  showToast(`Shifted live schedule to ${minutesToTimeStr(nowMins)}`);
+  showToast(`⏱️ Shifted to ${minutesToTimeStr(nowMins)} (${profile.label})`);
 }
 
 function shareWhatsAppStatus() {
@@ -2325,8 +2331,9 @@ async function runConstrainedOptimizer() {
     }
   }
   optimizerDraft = window.CarolOptimizer.optimizeDayHouses(optimizerDraft);
+  await window.CarolOptimizer.refreshRouteLegsWithTraffic(optimizerDraft, "afternoon");
   drawOptimizerDraft();
-  showToast("Optimized route with START/END pinned! Tap Save Order.");
+  showToast("Optimized with Afternoon Traffic! Tap Save Order.");
 }
 
 async function saveOptimizedOrder() {
