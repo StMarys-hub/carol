@@ -209,6 +209,15 @@
         </div>
       </div>
 
+      <!-- Admin Pending Song Approvals Panel (Shown at top of Songbook when Admin is unlocked & requests exist) -->
+      <div id="songbook-pending-panel" class="admin-card" style="display: none; border-color: var(--accent-gold); margin-bottom: 10px;">
+        <div class="admin-card-title">
+          <span id="songbook-pending-title">🔔 Pending Song Approvals</span>
+          <button class="mini-btn" onclick="loadPendingSongs()">↻ Refresh</button>
+        </div>
+        <div id="songbook-pending-list"></div>
+      </div>
+
       <!-- Add / Edit Song Panel on TOP -->
       <div id="add-song-panel" class="add-song-panel">
         <input type="hidden" id="edit-song-id" />
@@ -431,25 +440,8 @@
           </div>
         </div>
 
-        <!-- TAB 3: Ward Code, Pending Song Approvals & Broadcast -->
+        <!-- TAB 3: Ward Code, WhatsApp Invite & Broadcast -->
         <div id="admin-pane-security" class="admin-pane">
-          <div class="admin-card">
-            <div class="admin-card-title">
-              <span>🎵 Pending Song Approvals</span>
-              <button class="mini-btn" onclick="loadPendingSongs()">↻ Refresh</button>
-            </div>
-            <div id="admin-pending-songs-list">
-              <p class="helper-text">No pending song requests from ward members.</p>
-            </div>
-          </div>
-
-          <div class="admin-card">
-            <div class="admin-card-title"><span>🎶 Manage Shared Ward Songs</span></div>
-            <div id="admin-ward-songs-list">
-              <p class="helper-text">No custom shared songs added for this ward yet.</p>
-            </div>
-          </div>
-
           <div class="admin-card">
             <div class="admin-card-title"><span>📢 Live Message Broadcast</span></div>
             <p class="helper-text" style="margin-bottom: 10px;">Send an instant popup announcement to all connected carolers in this ward.</p>
@@ -665,9 +657,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=24" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=24" charset="UTF-8"></script>
-  <script src="./songbook.js?v=24" charset="UTF-8"></script>
-  <script src="./app.js?v=24" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=25" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=25" charset="UTF-8"></script>
+  <script src="./songbook.js?v=25" charset="UTF-8"></script>
+  <script src="./app.js?v=25" charset="UTF-8"></script>
 </body>
 </html>

@@ -1811,6 +1811,7 @@ function renderCurrentSongbook() {
 function openSongbookModal() {
   acquireWakeLockIfEnabled();
   renderCurrentSongbook();
+  loadPendingSongs();
   document.getElementById("songbook-modal").classList.add("open");
 }
 
@@ -2070,38 +2071,65 @@ async function adminDeleteSongById(songId, title) {
   }
 }
 
+let cachedPendingSongs = [];
+
 async function loadPendingSongs() {
-  const el = document.getElementById("admin-pending-songs-list");
-  if (!el || !adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient) return;
+  const panel = document.getElementById("songbook-pending-panel");
+  const listEl = document.getElementById("songbook-pending-list");
+  const titleEl = document.getElementById("songbook-pending-title");
+  if (!panel || !listEl) return;
+
+  if (!adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient) {
+    panel.style.display = "none";
+    cachedPendingSongs = [];
+    return;
+  }
+
   const { data, error } = await sbClient.rpc("admin_list_pending_songs", {
     p_ward_id: activeWardId,
     p_admin_code: adminSession.code
   });
   if (error || !data || !data.ok) {
-    el.innerHTML = `<p class="helper-text">Run migration 007 in Supabase to enable member song approvals.</p>`;
+    panel.style.display = "none";
     return;
   }
+
   const list = data.pending_songs || [];
+  cachedPendingSongs = list;
   if (!list.length) {
-    el.innerHTML = `<p class="helper-text">No pending song requests from ward members.</p>`;
+    panel.style.display = "none";
     return;
   }
-  el.innerHTML = list
+
+  if (titleEl) titleEl.textContent = `🔔 Pending Song Approvals (${list.length})`;
+  panel.style.display = "block";
+  listEl.innerHTML = list
     .map(
-      (s) => `
+      (s, idx) => `
       <div class="admin-item-row">
         <div class="admin-item-main">
-          <div class="admin-item-name">🎵 ${escapeHtml(s.title)}</div>
+          <div class="admin-item-name">🎵 ${escapeHtml(s.title)} ${s.karaoke_audio_url ? "🎧" : ""}</div>
           <div class="admin-item-sub">By ${escapeHtml(s.submitted_by || "Ward Member")} • ${escapeHtml((s.lyrics || "").slice(0, 75))}...</div>
         </div>
         <div class="admin-item-btns">
-          <button class="mini-btn mint" onclick="approveOrRejectSong('${s.id}', true, '${escapeJs(s.title)}')">✅ Approve &amp; Share</button>
+          <button class="mini-btn" onclick="previewPendingSong(${idx})">👁️ Preview</button>
+          <button class="mini-btn mint" onclick="approveOrRejectSong('${s.id}', true, '${escapeJs(s.title)}')">✅ Approve</button>
           <button class="mini-btn danger" onclick="approveOrRejectSong('${s.id}', false, '${escapeJs(s.title)}')">❌ Reject</button>
         </div>
       </div>
     `
     )
     .join("");
+}
+
+function previewPendingSong(idx) {
+  const s = cachedPendingSongs[idx];
+  if (!s) return;
+  const box = document.getElementById("song-lyrics-box");
+  if (box) {
+    box.textContent = `[PENDING PREVIEW: ${s.title}]\nSubmitted by: ${s.submitted_by || "Ward Member"}${s.karaoke_audio_url ? `\nKaraoke URL: ${s.karaoke_audio_url}` : ""}\n\n${s.lyrics || ""}`;
+  }
+  showToast(`Previewing "${s.title}" below`);
 }
 
 async function approveOrRejectSong(songId, approve, title) {
@@ -2114,6 +2142,7 @@ async function approveOrRejectSong(songId, approve, title) {
   if (data && data.ok) {
     await syncActiveWardOnline(true);
     await loadPendingSongs();
+    renderCurrentSongbook();
     if (approve && realtimeChannel) {
       realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
     }
