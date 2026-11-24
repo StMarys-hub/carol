@@ -173,10 +173,20 @@ AS $$
 DECLARE
   v_role text;
   v_ward text := upper(trim(p_ward_id));
+  v_title text;
 BEGIN
   v_role := public._assert_ward_admin(v_ward, p_admin_code);
 
   IF p_approve THEN
+    SELECT title INTO v_title FROM public.ward_songs WHERE id = p_song_id AND ward_id = v_ward;
+    -- If this approved song is an edit of an existing shared song with the same title, remove the older copy
+    IF v_title IS NOT NULL THEN
+      DELETE FROM public.ward_songs
+      WHERE ward_id = v_ward
+        AND id <> p_song_id
+        AND status = 'APPROVED'
+        AND lower(trim(title)) = lower(trim(v_title));
+    END IF;
     UPDATE public.ward_songs
     SET status = 'APPROVED'
     WHERE id = p_song_id AND ward_id = v_ward;

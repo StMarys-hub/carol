@@ -307,7 +307,7 @@ window.CarolSongbook = (function () {
       tabsEl.innerHTML = list
         .map(
           (s, idx) =>
-            `<button class="song-tab ${idx === activeIdx ? "active" : ""}" onclick="CarolSongbook.select(${idx})">${window.escapeHtml(s.title)}${s.karaoke_audio_url ? " 🎵" : ""}</button>`
+            `<button class="song-tab ${idx === activeIdx ? "active" : ""}" onclick="CarolSongbook.select(${idx})">${window.escapeHtml(s.title)}${s.karaoke_audio_url ? " 🎵" : ""}${s.sessionPending ? " (Pending)" : ""}</button>`
         )
         .join("");
     }
@@ -320,11 +320,11 @@ window.CarolSongbook = (function () {
     }
 
     if (editBtn) {
-      const canEdit = isAdmin || current.localOnly;
-      editBtn.style.display = canEdit ? "inline-flex" : "none";
+      // Allow both Admins AND regular ward members to edit any song & submit for approval
+      editBtn.style.display = "inline-flex";
     }
     if (delBtn) {
-      const canDelete = isAdmin || current.localOnly;
+      const canDelete = isAdmin || current.localOnly || current.sessionPending;
       delBtn.style.display = canDelete ? "inline-flex" : "none";
     }
 

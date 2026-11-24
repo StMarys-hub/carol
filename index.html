@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=19" />
+  <link rel="stylesheet" href="./styles.css?v=24" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -91,15 +91,19 @@
       <p id="lock-subtitle">Family names, addresses, and live carol ETAs are protected for St. Mary's parishioners.</p>
 
       <form onsubmit="handleUnlockSubmit(event)">
-        <input
-          type="password"
-          id="ward-code-input"
-          class="lock-code-input"
-          placeholder="••••"
-          autocomplete="off"
-          inputmode="text"
-          aria-label="Ward Access Code"
-        />
+        <div class="pw-wrap" style="margin-bottom: 12px;">
+          <input
+            type="password"
+            id="ward-code-input"
+            class="lock-code-input"
+            style="margin-bottom: 0;"
+            placeholder="••••"
+            autocomplete="off"
+            inputmode="text"
+            aria-label="Ward Access Code"
+          />
+          <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('ward-code-input', this)" title="Show / Hide Code" aria-label="Show or hide access code">👁️</button>
+        </div>
         <div id="lock-error" class="lock-error"></div>
         <button id="btn-unlock-submit" type="submit" class="btn-unlock">🔓 Unlock Ward Schedule</button>
       </form>
@@ -315,7 +319,10 @@
         </p>
         <div class="form-group">
           <label for="admin-code-input">Ward Admin Code</label>
-          <input type="password" id="admin-code-input" placeholder="Enter Admin Code" onkeydown="if(event.key==='Enter') handleAdminVerify()" />
+          <div class="pw-wrap">
+            <input type="password" id="admin-code-input" placeholder="Enter Admin Code" onkeydown="if(event.key==='Enter') handleAdminVerify()" />
+            <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('admin-code-input', this)" title="Show / Hide Code" aria-label="Show or hide admin code">👁️</button>
+          </div>
         </div>
         <div id="admin-login-error" class="lock-error"></div>
         <div class="modal-footer">
@@ -466,7 +473,10 @@
           <div class="admin-card">
             <div class="admin-card-title"><span>🔐 Change Ward Admin Code</span></div>
             <div class="form-group">
-              <input type="password" id="sec-new-admin-code" placeholder="New admin code (min 6 chars)" />
+              <div class="pw-wrap">
+                <input type="password" id="sec-new-admin-code" placeholder="New admin code (min 6 chars)" />
+                <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('sec-new-admin-code', this)" title="Show / Hide Code" aria-label="Show or hide new admin code">👁️</button>
+              </div>
             </div>
             <button class="btn-full btn-danger" onclick="rotateWardAdminCode()">Change Admin Code</button>
           </div>
@@ -655,9 +665,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=23" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=23" charset="UTF-8"></script>
-  <script src="./songbook.js?v=23" charset="UTF-8"></script>
-  <script src="./app.js?v=23" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=24" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=24" charset="UTF-8"></script>
+  <script src="./songbook.js?v=24" charset="UTF-8"></script>
+  <script src="./app.js?v=24" charset="UTF-8"></script>
 </body>
 </html>

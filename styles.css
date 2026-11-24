@@ -1357,6 +1357,34 @@ textarea {
   cursor: pointer;
 }
 
+/* Password Show/Hide Wrapper */
+.pw-wrap {
+  position: relative;
+  width: 100%;
+}
+.pw-wrap input {
+  padding-right: 46px;
+}
+.pw-eye-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  background: transparent;
+  border: none;
+  color: var(--text-secondary);
+  font-size: 1.08rem;
+  width: 34px;
+  height: 34px;
+  border-radius: 99px;
+  cursor: pointer;
+  display: grid;
+  place-items: center;
+}
+.pw-eye-btn:hover {
+  background: var(--bg-surface-elevated);
+}
+
 .toast {
   position: fixed;
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
