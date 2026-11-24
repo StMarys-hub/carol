@@ -676,8 +676,10 @@ let mapZoom = 1;
 let mapPanX = 0;
 let mapPanY = 0;
 let mapDrag = null;
+let lastMapRenderArgs = null;
 
-function applyMapTransform() {
+function rerenderRouteMapOnly() {
+  if (!lastMapRenderArgs) return;
   const el = document.getElementById("route-svg-container");
   if (!el) return;
   if (mapZoom <= 1) {
@@ -685,22 +687,23 @@ function applyMapTransform() {
     mapPanX = 0;
     mapPanY = 0;
   }
-  const maxPan = (mapZoom - 1) * 160;
+  const maxPan = (mapZoom - 1) * 190;
   mapPanX = Math.max(-maxPan, Math.min(maxPan, mapPanX));
   mapPanY = Math.max(-maxPan, Math.min(maxPan, mapPanY));
-  el.style.transform = `translate(${mapPanX.toFixed(1)}px, ${mapPanY.toFixed(1)}px) scale(${mapZoom.toFixed(2)})`;
+  el.style.transform = "";
+  el.innerHTML = renderOfflineRouteSvg(lastMapRenderArgs.computed, lastMapRenderArgs.nextIndex);
 }
 
 function zoomRouteMap(delta) {
-  mapZoom = Math.max(1, Math.min(3.6, Number((mapZoom + delta).toFixed(2))));
-  applyMapTransform();
+  mapZoom = Math.max(1, Math.min(5, Number((mapZoom + delta).toFixed(2))));
+  rerenderRouteMapOnly();
 }
 
 function resetRouteMapZoom() {
   mapZoom = 1;
   mapPanX = 0;
   mapPanY = 0;
-  applyMapTransform();
+  rerenderRouteMapOnly();
 }
 
 function initRouteMapPanHandlers() {
@@ -711,35 +714,31 @@ function initRouteMapPanHandlers() {
   vp.addEventListener("pointerdown", (e) => {
     if (mapZoom <= 1) return;
     mapDrag = { startX: e.clientX, startY: e.clientY, origX: mapPanX, origY: mapPanY };
-    const el = document.getElementById("route-svg-container");
-    if (el) el.style.transition = "none";
   });
 
   window.addEventListener("pointermove", (e) => {
     if (!mapDrag) return;
     mapPanX = mapDrag.origX + (e.clientX - mapDrag.startX);
     mapPanY = mapDrag.origY + (e.clientY - mapDrag.startY);
-    applyMapTransform();
+    rerenderRouteMapOnly();
   });
 
   window.addEventListener("pointerup", () => {
-    if (!mapDrag) return;
     mapDrag = null;
-    const el = document.getElementById("route-svg-container");
-    if (el) el.style.transition = "transform 0.14s ease";
   });
 
   vp.addEventListener(
     "wheel",
     (e) => {
       e.preventDefault();
-      zoomRouteMap(e.deltaY < 0 ? 0.25 : -0.25);
+      zoomRouteMap(e.deltaY < 0 ? 0.35 : -0.35);
     },
     { passive: false }
   );
 }
 
 function renderOfflineRouteSvg(computed, nextIndex) {
+  lastMapRenderArgs = { computed, nextIndex };
   const days = getDays();
   const otherDayGroups = days
     .filter((d) => d.id !== activeDayId)
@@ -773,14 +772,19 @@ function renderOfflineRouteSvg(computed, nextIndex) {
 
   const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
   const spanLat = Math.max(maxLat - minLat, 0.005);
-  const scale = Math.min((W - pad * 2) / spanLng, (H - pad * 2) / spanLat);
-  const offX = (W - spanLng * scale) / 2;
-  const offY = (H - spanLat * scale) / 2;
+  const baseScale = Math.min((W - pad * 2) / spanLng, (H - pad * 2) / spanLat);
+  const offX = (W - spanLng * baseScale) / 2;
+  const offY = (H - spanLat * baseScale) / 2;
 
-  const project = (lat, lng) => ({
-    x: offX + (lng - minLng) * cosLat * scale,
-    y: H - (offY + (lat - minLat) * scale)
-  });
+  // Semantic Zoom: expands leg distances around center while keeping pin circles & labels constant size
+  const project = (lat, lng) => {
+    const bx = offX + (lng - minLng) * cosLat * baseScale;
+    const by = H - (offY + (lat - minLat) * baseScale);
+    return {
+      x: W / 2 + (bx - W / 2) * mapZoom + mapPanX,
+      y: H / 2 + (by - H / 2) * mapZoom + mapPanY
+    };
+  };
 
   // 1. Render OTHER (inactive) carol days underneath — clearly visible muted style (theme-aware)
   const isLight = !!prefs.lightTheme;
@@ -801,10 +805,16 @@ function renderOfflineRouteSvg(computed, nextIndex) {
           const d = Math.hypot(dx, dy) || 0.01;
           if (d < 15) {
             const push = (15 - d) / 2;
-            pts[i].x = Math.max(12, Math.min(W - 12, pts[i].x - (dx / d) * push));
-            pts[i].y = Math.max(12, Math.min(H - 12, pts[i].y - (dy / d) * push));
-            pts[j].x = Math.max(12, Math.min(W - 12, pts[j].x + (dx / d) * push));
-            pts[j].y = Math.max(12, Math.min(H - 12, pts[j].y + (dy / d) * push));
+            pts[i].x -= (dx / d) * push;
+            pts[i].y -= (dy / d) * push;
+            pts[j].x += (dx / d) * push;
+            pts[j].y += (dy / d) * push;
+            if (mapZoom === 1) {
+              pts[i].x = Math.max(12, Math.min(W - 12, pts[i].x));
+              pts[i].y = Math.max(12, Math.min(H - 12, pts[i].y));
+              pts[j].x = Math.max(12, Math.min(W - 12, pts[j].x));
+              pts[j].y = Math.max(12, Math.min(H - 12, pts[j].y));
+            }
           }
         }
       }
@@ -843,10 +853,16 @@ function renderOfflineRouteSvg(computed, nextIndex) {
         const d = Math.hypot(dx, dy) || 0.01;
         if (d < 21) {
           const push = (21 - d) / 2;
-          valid[i].x = Math.max(15, Math.min(W - 15, valid[i].x - (dx / d) * push));
-          valid[i].y = Math.max(15, Math.min(H - 15, valid[i].y - (dy / d) * push));
-          valid[j].x = Math.max(15, Math.min(W - 15, valid[j].x + (dx / d) * push));
-          valid[j].y = Math.max(15, Math.min(H - 15, valid[j].y + (dy / d) * push));
+          valid[i].x -= (dx / d) * push;
+          valid[i].y -= (dy / d) * push;
+          valid[j].x += (dx / d) * push;
+          valid[j].y += (dy / d) * push;
+          if (mapZoom === 1) {
+            valid[i].x = Math.max(15, Math.min(W - 15, valid[i].x));
+            valid[i].y = Math.max(15, Math.min(H - 15, valid[i].y));
+            valid[j].x = Math.max(15, Math.min(W - 15, valid[j].x));
+            valid[j].y = Math.max(15, Math.min(H - 15, valid[j].y));
+          }
         }
       }
     }
@@ -1120,7 +1136,6 @@ function render() {
   document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
   document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, currentStop ? currentStop.index : -1);
   initRouteMapPanHandlers();
-  applyMapTransform();
   const mapLegs = window.CarolOptimizer.buildChunkedGoogleMapsLegs(computed, 9);
   document.getElementById("snapshot-map-links").innerHTML = mapLegs
     .map((l) => `<a class="map-leg-btn" href="${l.url}" target="_blank" rel="noopener">${escapeHtml(l.label)}</a>`)
