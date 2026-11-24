@@ -2123,6 +2123,12 @@ function openEditHouseModal(houseId) {
   document.getElementById("edit-house-id").value = h.id;
   document.getElementById("edit-house-family").value = h.family_name || "";
   document.getElementById("edit-house-address").value = h.address || "";
+  const daySel = document.getElementById("edit-house-day");
+  if (daySel) {
+    daySel.innerHTML = getDays()
+      .map((d) => `<option value="${d.id}" ${d.id === h.carol_day_id ? "selected" : ""}>${escapeHtml(d.label)}</option>`)
+      .join("");
+  }
   document.getElementById("edit-house-role").value = h.stop_role || "";
   document.getElementById("edit-house-mins").value = h.visit_mins || 20;
   document.getElementById("edit-house-phone").value = h.phone || "";
@@ -2134,6 +2140,7 @@ async function saveEditedHouse() {
   const id = document.getElementById("edit-house-id").value;
   const family_name = document.getElementById("edit-house-family").value.trim();
   const address = document.getElementById("edit-house-address").value.trim();
+  const newDayId = document.getElementById("edit-house-day")?.value || "";
   const stop_role = document.getElementById("edit-house-role").value || null;
   const visit_mins = Math.max(5, parseInt(document.getElementById("edit-house-mins").value, 10) || 20);
   const phone = document.getElementById("edit-house-phone").value.trim();
@@ -2149,12 +2156,67 @@ async function saveEditedHouse() {
   const existing = (wardPayload.ward_houses || []).find((x) => x.id === id);
   let lat = existing ? existing.lat : null;
   let lng = existing ? existing.lng : null;
-  if (existing && existing.address !== address) {
+  if (existing && (existing.address !== address || typeof lat !== "number" || typeof lng !== "number")) {
     const c = await window.CarolOptimizer.geocodeAddress(address);
     if (c) {
       lat = c.lat;
       lng = c.lng;
     }
+  }
+
+  // If Admin moved this house to a different Carol Day, move it cleanly & place at best route spot on the new day
+  if (existing && newDayId && newDayId !== existing.carol_day_id && wardPayload.active_season) {
+    const oldDayHouses = window.CarolOptimizer.recomputeLegEstimates(
+      getDayHouses(existing.carol_day_id).filter((h) => h.id !== id)
+    );
+    const targetDayHouses = getDayHouses(newDayId).map((h) => ({ ...h }));
+    const movedHouse = {
+      ...existing,
+      carol_day_id: newDayId,
+      family_name,
+      address,
+      stop_role,
+      visit_mins,
+      phone,
+      notes,
+      lat,
+      lng,
+      visited: false,
+      checked_in_at: null
+    };
+
+    const coords = typeof lat === "number" && typeof lng === "number" ? { lat, lng } : null;
+    const { insertIdx } = window.CarolOptimizer.findBestInsertionSlot(targetDayHouses, coords);
+    targetDayHouses.splice(insertIdx, 0, movedHouse);
+    const updatedTarget = window.CarolOptimizer.recomputeLegEstimates(targetDayHouses);
+
+    const { data: d1 } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: existing.carol_day_id,
+      p_houses: oldDayHouses,
+      p_replace_day: true
+    });
+    const { data: d2 } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: newDayId,
+      p_houses: updatedTarget,
+      p_replace_day: true
+    });
+
+    if (d1 && d1.ok && d2 && d2.ok) {
+      closeModal("edit-house-modal");
+      await syncActiveWardOnline(true);
+      broadcastPiiFreeEtaShift(newDayId, 0, new Date().toISOString());
+      populateAdminControls();
+      const targetLabel = (getDays().find((d) => d.id === newDayId) || {}).label || "new day";
+      showToast(`Moved ${family_name} to ${targetLabel} (Stop #${insertIdx + 1})!`);
+      return;
+    }
+    return showToast("Could not move house to the selected day.");
   }
 
   const { data, error } = await sbClient.rpc("admin_upsert_single_house", {
