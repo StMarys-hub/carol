@@ -541,6 +541,7 @@ function toggleTheme() {
   prefs.lightTheme = !prefs.lightTheme;
   savePrefs();
   applyUiPrefs();
+  if (wardPayload) render();
   showToast(prefs.lightTheme ? "Daytime Snow Theme ON ☀️" : "Midnight Evergreen Night Theme 🌙");
 }
 
@@ -704,24 +705,45 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     y: H - (offY + (lat - minLat) * scale)
   });
 
-  // 1. Render OTHER (inactive) carol days underneath in subtle dimmed style
+  // 1. Render OTHER (inactive) carol days underneath — clearly visible muted style (theme-aware)
+  const isLight = !!prefs.lightTheme;
   let otherDaysSvg = "";
-  const otherColors = ["#64748B", "#475569", "#52525B"];
+  const otherColors = isLight ? ["#64748B", "#475569", "#78716C"] : ["#94A3B8", "#7DD3FC", "#A78BFA"];
+  const otherFill = isLight ? "#E2E8F0" : "#1E293B";
+  const otherText = isLight ? "#1E293B" : "#E2E8F0";
+
   otherDayGroups.forEach((group, gIdx) => {
     const col = otherColors[gIdx % otherColors.length];
     const pts = group.houses.map((h) => project(h.lat, h.lng));
+    // Light de-overlap on other-day pins too
+    for (let pass = 0; pass < 6; pass++) {
+      for (let i = 0; i < pts.length; i++) {
+        for (let j = i + 1; j < pts.length; j++) {
+          const dx = pts[j].x - pts[i].x;
+          const dy = pts[j].y - pts[i].y;
+          const d = Math.hypot(dx, dy) || 0.01;
+          if (d < 15) {
+            const push = (15 - d) / 2;
+            pts[i].x = Math.max(12, Math.min(W - 12, pts[i].x - (dx / d) * push));
+            pts[i].y = Math.max(12, Math.min(H - 12, pts[i].y - (dy / d) * push));
+            pts[j].x = Math.max(12, Math.min(W - 12, pts[j].x + (dx / d) * push));
+            pts[j].y = Math.max(12, Math.min(H - 12, pts[j].y + (dy / d) * push));
+          }
+        }
+      }
+    }
     let segs = "";
     for (let i = 1; i < pts.length; i++) {
-      segs += `<line x1="${pts[i - 1].x.toFixed(1)}" y1="${pts[i - 1].y.toFixed(1)}" x2="${pts[i].x.toFixed(1)}" y2="${pts[i].y.toFixed(1)}" stroke="${col}" stroke-width="1.3" stroke-dasharray="3 3" opacity="0.45" />`;
+      segs += `<line x1="${pts[i - 1].x.toFixed(1)}" y1="${pts[i - 1].y.toFixed(1)}" x2="${pts[i].x.toFixed(1)}" y2="${pts[i].y.toFixed(1)}" stroke="${col}" stroke-width="1.7" stroke-dasharray="4 3" opacity="0.72" />`;
     }
     let dots = "";
     pts.forEach((p, idx) => {
       const h = group.houses[idx];
       dots += `
-        <g style="cursor:pointer;" opacity="0.42" onclick="switchDay('${group.day.id}')">
+        <g style="cursor:pointer;" opacity="0.76" onclick="switchDay('${group.day.id}')">
           <title>${escapeHtml(group.day.label)} • #${idx + 1} ${escapeHtml(h.family_name)} (Tap to switch day)</title>
-          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="6.2" fill="#0F172A" stroke="${col}" stroke-width="1.2" />
-          <text x="${p.x.toFixed(1)}" y="${(p.y + 2.4).toFixed(1)}" text-anchor="middle" fill="#94A3B8" font-size="6.8" font-weight="800" font-family="sans-serif">${idx + 1}</text>
+          <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="7.2" fill="${otherFill}" stroke="${col}" stroke-width="1.5" />
+          <text x="${p.x.toFixed(1)}" y="${(p.y + 2.6).toFixed(1)}" text-anchor="middle" fill="${otherText}" font-size="7.5" font-weight="800" font-family="sans-serif">${idx + 1}</text>
         </g>
       `;
     });
@@ -760,8 +782,12 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     if (!p1 || !p2) continue;
     const isWalk = (computed[i].distance_label || "").toLowerCase().includes("walk");
     const isDone = computed[i - 1].visited && computed[i].visited;
-    const stroke = isDone ? "#34D399" : isWalk ? "#C084FC" : "#38BDF8";
-    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="2.5" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+    const stroke = isDone
+      ? (isLight ? "#059669" : "#34D399")
+      : isWalk
+      ? (isLight ? "#9333EA" : "#C084FC")
+      : (isLight ? "#0284C7" : "#38BDF8");
+    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="2.6" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
   }
 
   let activePinsSvg = "";
@@ -769,12 +795,24 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     const p = projected[idx];
     if (!p) return;
     const isCur = idx === nextIndex;
-    const fill = s.visited ? "#059669" : isCur ? "#F59E0B" : s.isLast ? "#DC2626" : "#0B251D";
-    const stroke = s.visited ? "#6EE7B7" : isCur ? "#FFFFFF" : s.isLast ? "#FCA5A5" : "#38BDF8";
+    const fill = s.visited
+      ? "#059669"
+      : isCur
+      ? "#F59E0B"
+      : s.isLast
+      ? "#DC2626"
+      : (isLight ? "#0284C7" : "#0B251D");
+    const stroke = s.visited
+      ? (isLight ? "#047857" : "#6EE7B7")
+      : isCur
+      ? (isLight ? "#B45309" : "#FFFFFF")
+      : s.isLast
+      ? (isLight ? "#991B1B" : "#FCA5A5")
+      : (isLight ? "#0369A1" : "#38BDF8");
     activePinsSvg += `
       <g style="cursor:pointer;" onclick="jumpToStop('${s.id}')">
         <title>#${idx + 1} ${escapeHtml(s.family_name)} — ${escapeHtml(s.address)}</title>
-        ${isCur ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15.5" fill="rgba(245,158,11,0.28)" />` : ""}
+        ${isCur ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15.5" fill="rgba(245,158,11,0.3)" />` : ""}
         <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11.2 : 9.6}" fill="${fill}" stroke="${stroke}" stroke-width="2" />
         <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${isCur ? "#000" : "#FFF"}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
       </g>

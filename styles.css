@@ -9,6 +9,7 @@
   --bg-surface-elevated: #0F172A;
   --bg-hero: #142214;
   --bg-input: #05130F;
+  --bg-map: #040E0B;
   --border-subtle: #1D3B30;
   --border-strong: #335C4C;
 
@@ -43,6 +44,7 @@ html.light-theme {
   --bg-surface-elevated: #E2E8F0;
   --bg-hero: #FFFBEB;
   --bg-input: #FFFFFF;
+  --bg-map: #F8FAFC;
   --border-subtle: #CBD5E1;
   --border-strong: #94A3B8;
 
@@ -473,7 +475,7 @@ body {
 }
 .route-svg-wrap {
   margin-top: 10px;
-  background: #040E0B;
+  background: var(--bg-map);
   border: 1.5px solid var(--border-subtle);
   border-radius: var(--radius-sm);
   padding: 6px;
