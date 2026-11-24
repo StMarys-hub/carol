@@ -1747,13 +1747,20 @@ async function submitNewHouse() {
 
 // ---------- Songbook Integration ----------
 
+function keyHiddenBuiltins(wardId) {
+  return `carol_hidden_songs_${wardId}`;
+}
+
 function getCombinedSongs() {
   const dbSongs = (wardPayload && wardPayload.ward_songs) || [];
   let localSongs = [];
+  let hiddenIds = [];
   try {
     localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
+    hiddenIds = JSON.parse(localStorage.getItem(keyHiddenBuiltins(activeWardId)) || "[]");
   } catch (e) {}
-  return [...CFG.DEFAULT_SONGS, ...dbSongs, ...localSongs];
+  const builtins = CFG.DEFAULT_SONGS.filter((s) => !hiddenIds.includes(s.id));
+  return [...builtins, ...dbSongs, ...localSongs];
 }
 
 function renderCurrentSongbook() {
@@ -1887,9 +1894,15 @@ async function saveNewSong() {
 async function deleteCurrentSong() {
   const songs = getCombinedSongs();
   const cur = songs[window.CarolSongbook.getActiveIdx()];
-  if (!cur || String(cur.id).startsWith("builtin-")) return;
+  if (!cur) return;
+  if (!window.confirm(`Delete "${cur.title}" from the Songbook?`)) return;
 
-  if (cur.localOnly) {
+  if (String(cur.id).startsWith("builtin-")) {
+    let hiddenIds = [];
+    try { hiddenIds = JSON.parse(localStorage.getItem(keyHiddenBuiltins(activeWardId)) || "[]"); } catch (e) {}
+    if (!hiddenIds.includes(cur.id)) hiddenIds.push(cur.id);
+    localStorage.setItem(keyHiddenBuiltins(activeWardId), JSON.stringify(hiddenIds));
+  } else if (cur.localOnly) {
     const localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]").filter((s) => s.id !== cur.id);
     localStorage.setItem(keyLocalSongs(activeWardId), JSON.stringify(localSongs));
   } else if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
@@ -1905,7 +1918,50 @@ async function deleteCurrentSong() {
   }
   window.CarolSongbook.setActiveIdx(0);
   renderCurrentSongbook();
+  renderAdminWardSongs();
   showToast(`Deleted "${cur.title}"`);
+}
+
+function renderAdminWardSongs() {
+  const el = document.getElementById("admin-ward-songs-list");
+  if (!el) return;
+  const dbSongs = (wardPayload && wardPayload.ward_songs) || [];
+  if (!dbSongs.length) {
+    el.innerHTML = `<p class="helper-text">No custom shared songs added for this ward yet.</p>`;
+    return;
+  }
+  el.innerHTML = dbSongs
+    .map(
+      (s) => `
+      <div class="admin-item-row">
+        <div class="admin-item-main">
+          <div class="admin-item-name">🎵 ${escapeHtml(s.title)}</div>
+          <div class="admin-item-sub">${s.karaoke_audio_url ? "Has Karaoke Track • " : ""}${escapeHtml((s.lyrics || "").slice(0, 60))}...</div>
+        </div>
+        <div class="admin-item-btns">
+          <button class="mini-btn danger" onclick="adminDeleteSongById('${s.id}', '${escapeJs(s.title)}')">🗑️ Delete</button>
+        </div>
+      </div>
+    `
+    )
+    .join("");
+}
+
+async function adminDeleteSongById(songId, title) {
+  if (!window.confirm(`Delete shared song "${title}" for all ward members?`)) return;
+  const { data } = await sbClient.rpc("admin_delete_song", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_song_id: songId
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    renderAdminWardSongs();
+    if (realtimeChannel) {
+      realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
+    }
+    showToast(`Deleted "${title}" for all ward members`);
+  }
 }
 
 async function loadPendingSongs() {
@@ -2026,6 +2082,7 @@ function populateAdminControls() {
   renderOptimizerList();
   renderAdminSeasonsAndDays();
   loadPendingSongs();
+  renderAdminWardSongs();
 }
 
 function renderAdminSeasonsAndDays() {

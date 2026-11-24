@@ -319,7 +319,7 @@ window.CarolSongbook = (function () {
     }
 
     if (delBtn) {
-      const canDelete = !String(current.id || "").startsWith("builtin-") && (isAdmin || current.localOnly);
+      const canDelete = isAdmin || current.localOnly;
       delBtn.style.display = canDelete ? "inline-flex" : "none";
     }
 
