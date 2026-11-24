@@ -614,12 +614,22 @@ function calculateSchedule(dayObj, houses) {
   let cursor = timeStrToMinutes(dayObj ? dayObj.start_time : "14:00");
   let totalTravelMins = 0;
   let totalCarolMins = 0;
+  let totalMiles = 0;
 
   const computed = houses.map((h, index) => {
     const driveFromPrev = index === 0 ? 0 : Number(h.drive_mins) || 0;
     if (index > 0) {
       cursor += driveFromPrev;
       totalTravelMins += driveFromPrev;
+      const miMatch = String(h.distance_label || "").match(/(\d+(?:\.\d+)?)\s*mi/i);
+      if (miMatch) {
+        totalMiles += parseFloat(miMatch[1]);
+      } else {
+        const prev = houses[index - 1];
+        if (prev && typeof prev.lat === "number" && typeof h.lat === "number") {
+          totalMiles += window.CarolOptimizer.haversineMiles(prev.lat, prev.lng, h.lat, h.lng) * 1.28;
+        }
+      }
     }
     const arrivalMins = cursor;
     const duration = Number(h.visit_mins) || defaultVisit;
@@ -644,7 +654,7 @@ function calculateSchedule(dayObj, houses) {
     };
   });
 
-  return { computed, totalTravelMins, totalCarolMins };
+  return { computed, totalTravelMins, totalCarolMins, totalMiles };
 }
 
 function getNavUrl(address, lat, lng) {
@@ -1021,7 +1031,7 @@ function render() {
 
   const activeDay = days.find((d) => d.id === activeDayId) || days[0] || null;
   const houses = activeDay ? getDayHouses(activeDay.id) : [];
-  const { computed, totalTravelMins, totalCarolMins } = calculateSchedule(activeDay, houses);
+  const { computed, totalTravelMins, totalCarolMins, totalMiles } = calculateSchedule(activeDay, houses);
 
   const seasonName = wardPayload.active_season ? wardPayload.active_season.name : "Christmas Carol";
   document.getElementById("header-subtitle").textContent = activeDay
@@ -1036,11 +1046,11 @@ function render() {
 
   document.getElementById("metric-progress").textContent = `${completedStops.length} / ${computed.length}`;
   document.getElementById("metric-dinner-eta").textContent = finalStop ? finalStop.arrivalFormatted : "--:--";
-  document.getElementById("metric-ratios").textContent = `${totalTravelMins}m / ${totalCarolMins}m`;
+  document.getElementById("metric-ratios").textContent = `${totalTravelMins}m (${totalMiles.toFixed(1)} mi)`;
   document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
 
   // Snapshot Map + Chunked Multi-Stop Google Maps Legs
-  document.getElementById("snapshot-miles-label").textContent = `• ${computed.length} stops`;
+  document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
   document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, currentStop ? currentStop.index : -1);
   const mapLegs = window.CarolOptimizer.buildChunkedGoogleMapsLegs(computed, 9);
   document.getElementById("snapshot-map-links").innerHTML = mapLegs
