@@ -10,6 +10,89 @@ if ("serviceWorker" in navigator) {
   });
 }
 
+// ---------- Cross-Platform PWA Install (Android Chrome + iPhone Safari) ----------
+let deferredInstallPrompt = null;
+
+function isAppAlreadyInstalled() {
+  return (
+    window.matchMedia("(display-mode: standalone)").matches ||
+    window.navigator.standalone === true
+  );
+}
+
+function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent || "") ||
+    (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function updateInstallBarVisibility() {
+  const bar = document.getElementById("bottom-install-bar");
+  if (!bar) return;
+  if (isAppAlreadyInstalled() || sessionStorage.getItem("carol_install_dismissed")) {
+    bar.classList.add("hidden");
+  } else {
+    bar.classList.remove("hidden");
+  }
+}
+
+window.addEventListener("beforeinstallprompt", (e) => {
+  e.preventDefault();
+  deferredInstallPrompt = e;
+  updateInstallBarVisibility();
+});
+
+window.addEventListener("appinstalled", () => {
+  deferredInstallPrompt = null;
+  const bar = document.getElementById("bottom-install-bar");
+  if (bar) bar.classList.add("hidden");
+  showToast("🎉 St. Mary's Carol App installed!");
+});
+
+function dismissBottomInstallBar() {
+  sessionStorage.setItem("carol_install_dismissed", "1");
+  const bar = document.getElementById("bottom-install-bar");
+  if (bar) bar.classList.add("hidden");
+}
+
+async function handleInstallAppClick() {
+  // 1. Android / Desktop Chrome / Edge native 1-tap install prompt
+  if (deferredInstallPrompt) {
+    deferredInstallPrompt.prompt();
+    try {
+      const choice = await deferredInstallPrompt.userChoice;
+      if (choice && choice.outcome === "accepted") {
+        dismissBottomInstallBar();
+      }
+    } catch (e) {}
+    deferredInstallPrompt = null;
+    return;
+  }
+
+  // 2. iPhone / iPad (iOS Safari) or fallback manual steps
+  const body = document.getElementById("install-guide-body");
+  if (isIosDevice()) {
+    body.innerHTML = `
+      <p style="margin-bottom:10px;">Install on your <strong style="color:var(--accent-gold);">iPhone / iPad</strong> in 3 quick taps:</p>
+      <ol style="padding-left:20px; display:flex; flex-direction:column; gap:8px;">
+        <li>Open this page in <strong>Safari</strong> (if you opened it inside WhatsApp, tap the Safari compass icon first).</li>
+        <li>Tap the <strong>Share</strong> button (<strong>□↑</strong>) at the bottom of Safari.</li>
+        <li>Scroll down and tap <strong>Add to Home Screen</strong>, then tap <strong>Add</strong>.</li>
+      </ol>
+    `;
+  } else {
+    body.innerHTML = `
+      <p style="margin-bottom:10px;">Install on <strong style="color:var(--accent-mint);">Android (Chrome)</strong>:</p>
+      <ol style="padding-left:20px; display:flex; flex-direction:column; gap:8px; margin-bottom:12px;">
+        <li>Tap the <strong>⋮ Menu</strong> in the top-right corner of Chrome.</li>
+        <li>Tap <strong>Install app</strong> or <strong>Add to Home screen</strong>.</li>
+      </ol>
+      <p style="margin-bottom:6px;">Install on <strong style="color:var(--accent-gold);">iPhone (Safari)</strong>:</p>
+      <p>Tap <strong>Share (□↑)</strong> → <strong>Add to Home Screen</strong> → <strong>Add</strong>.</p>
+    `;
+  }
+  document.getElementById("install-guide-modal").classList.add("open");
+}
+
 // ---------- Global App State ----------
 const CFG = window.CAROL_APP_CONFIG;
 let sbClient = null;
@@ -2439,4 +2522,5 @@ window.showToast = function (msg) {
 };
 
 // Boot App
+updateInstallBarVisibility();
 bootActiveWard();

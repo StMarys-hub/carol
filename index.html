@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=3" />
+  <link rel="stylesheet" href="./styles.css?v=11" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -602,11 +602,39 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
     </div>
   </div>
 
+  <!-- Bottom Install App Bar (Works on Android & iPhone; auto-hides when installed) -->
+  <div id="bottom-install-bar" class="bottom-install-bar">
+    <div class="bottom-install-inner">
+      <div class="bottom-install-text">
+        📲 Install St. Mary's Carol App
+        <span>Works offline on Android &amp; iPhone</span>
+      </div>
+      <div class="bottom-install-actions">
+        <button class="btn-bottom-install" onclick="handleInstallAppClick()">Install App</button>
+        <button class="btn-bottom-dismiss" onclick="dismissBottomInstallBar()" aria-label="Dismiss install bar">✕</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- iPhone / Android Manual Install Guide Modal -->
+  <div id="install-guide-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'install-guide-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 460px;">
+      <div class="modal-header">
+        <h2>📲 Install St. Mary's Carol App</h2>
+        <button class="close-btn" onclick="closeModal('install-guide-modal')">✕ Close</button>
+      </div>
+      <div id="install-guide-body" style="font-size: 0.92rem; color: var(--text-secondary); line-height: 1.55;"></div>
+      <div class="modal-footer">
+        <button class="btn-full btn-gold" onclick="closeModal('install-guide-modal')">✓ Got It</button>
+      </div>
+    </div>
+  </div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=10" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=10" charset="UTF-8"></script>
-  <script src="./songbook.js?v=10" charset="UTF-8"></script>
-  <script src="./app.js?v=10" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=11" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=11" charset="UTF-8"></script>
+  <script src="./songbook.js?v=11" charset="UTF-8"></script>
+  <script src="./app.js?v=11" charset="UTF-8"></script>
 </body>
 </html>
