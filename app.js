@@ -1759,7 +1759,11 @@ function getCombinedSongs() {
     localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
     hiddenIds = JSON.parse(localStorage.getItem(keyHiddenBuiltins(activeWardId)) || "[]");
   } catch (e) {}
-  const builtins = CFG.DEFAULT_SONGS.filter((s) => !hiddenIds.includes(s.id));
+  // Hide any built-in song overridden by a shared ward song with the same title
+  const dbTitles = new Set(dbSongs.map((s) => (s.title || "").trim().toLowerCase()));
+  const builtins = CFG.DEFAULT_SONGS.filter(
+    (s) => !hiddenIds.includes(s.id) && !dbTitles.has((s.title || "").trim().toLowerCase())
+  );
   return [...builtins, ...dbSongs, ...localSongs];
 }
 
@@ -1781,19 +1785,49 @@ function closeSongbookModal() {
 
 function toggleAddSongPanel() {
   const panel = document.getElementById("add-song-panel");
+  const opening = !panel.classList.contains("open");
   panel.classList.toggle("open");
+  if (opening) {
+    // Reset to fresh "Add New Song" mode
+    document.getElementById("edit-song-id").value = "";
+    document.getElementById("new-song-url").value = "";
+    document.getElementById("new-song-title").value = "";
+    document.getElementById("new-song-audio").value = "";
+    document.getElementById("new-song-lyrics").value = "";
+  }
   const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
   const noteEl = document.getElementById("song-submit-note");
   const btnEl = document.getElementById("btn-save-song");
   if (noteEl && btnEl) {
     if (isAdmin) {
-      noteEl.textContent = "Admin mode: Song will be published immediately to all ward members.";
+      noteEl.textContent = "Admin mode: Song & Karaoke Audio/YouTube URL will sync immediately to all ward members.";
       btnEl.textContent = "💾 Save & Sync to Ward";
     } else {
       noteEl.textContent = "Submitted songs are sent to your Ward Coordinator for quick approval before syncing to everyone.";
       btnEl.textContent = "📤 Submit for Coordinator Approval";
     }
   }
+}
+
+function openEditCurrentSong() {
+  const songs = getCombinedSongs();
+  const cur = songs[window.CarolSongbook.getActiveIdx()];
+  if (!cur) return;
+
+  document.getElementById("edit-song-id").value = cur.id || "";
+  document.getElementById("new-song-url").value = cur.source_url || "";
+  document.getElementById("new-song-title").value = cur.title || "";
+  document.getElementById("new-song-audio").value = cur.karaoke_audio_url || "";
+  document.getElementById("new-song-lyrics").value = cur.lyrics || "";
+
+  const noteEl = document.getElementById("song-submit-note");
+  const btnEl = document.getElementById("btn-save-song");
+  if (noteEl) noteEl.textContent = `Editing "${cur.title}" — add/update Karaoke Audio/YouTube URL or lyrics and tap Update.`;
+  if (btnEl) btnEl.textContent = "💾 Update & Sync Song";
+
+  document.getElementById("add-song-panel").classList.add("open");
+  const sheet = document.querySelector("#songbook-modal .modal-sheet");
+  if (sheet) sheet.scrollTop = 0;
 }
 
 async function fetchLyricsFromUrl() {
@@ -1831,6 +1865,7 @@ async function fetchLyricsFromUrl() {
 }
 
 async function saveNewSong() {
+  const editId = (document.getElementById("edit-song-id")?.value || "").trim();
   const title = document.getElementById("new-song-title").value.trim();
   const lyrics = document.getElementById("new-song-lyrics").value.trim();
   const karaoke_audio_url = document.getElementById("new-song-audio").value.trim();
@@ -1848,18 +1883,28 @@ async function saveNewSong() {
       p_song: { title, lang: "Custom", lyrics, karaoke_audio_url, source_url }
     });
     if (data && data.ok) {
+      // If editing an existing Supabase song, remove the old version cleanly
+      if (editId && !editId.startsWith("builtin-") && !editId.startsWith("local-")) {
+        await sbClient.rpc("admin_delete_song", {
+          p_ward_id: activeWardId,
+          p_admin_code: adminSession.code,
+          p_song_id: editId
+        });
+      }
       await syncActiveWardOnline(true);
       if (realtimeChannel) {
         realtimeChannel.send({ type: "broadcast", event: "songs_updated", payload: { ward_id: activeWardId } });
       }
       const all = getCombinedSongs();
-      window.CarolSongbook.setActiveIdx(all.length - 1);
+      const newIdx = all.findIndex((s) => s.title === title);
+      window.CarolSongbook.setActiveIdx(newIdx !== -1 ? newIdx : all.length - 1);
       renderCurrentSongbook();
-      showToast(`Published "${title}" to all ward members!`);
+      renderAdminWardSongs();
+      showToast(editId ? `Updated "${title}" & synced to ward!` : `Published "${title}" to all ward members!`);
     } else {
       return showToast(`Save failed: ${(data && data.error) || "Error"}`);
     }
-  } else if (sbClient && cachedUserCode) {
+  } else if (!editId && sbClient && cachedUserCode) {
     const { data, error } = await sbClient.rpc("submit_ward_song", {
       p_ward_id: activeWardId,
       p_user_code: cachedUserCode,
@@ -1874,8 +1919,14 @@ async function saveNewSong() {
       return showToast("Submit failed — run migration 007 in Supabase SQL Editor.");
     }
   } else {
-    const localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
-    localSongs.push({ id: `local-song-${Date.now()}`, title, lang: "Custom", lyrics, karaoke_audio_url, source_url, localOnly: true });
+    let localSongs = JSON.parse(localStorage.getItem(keyLocalSongs(activeWardId)) || "[]");
+    if (editId && editId.startsWith("local-")) {
+      localSongs = localSongs.map((s) =>
+        s.id === editId ? { ...s, title, lyrics, karaoke_audio_url, source_url } : s
+      );
+    } else {
+      localSongs.push({ id: `local-song-${Date.now()}`, title, lang: "Custom", lyrics, karaoke_audio_url, source_url, localOnly: true });
+    }
     localStorage.setItem(keyLocalSongs(activeWardId), JSON.stringify(localSongs));
     const all = getCombinedSongs();
     window.CarolSongbook.setActiveIdx(all.length - 1);
@@ -1883,6 +1934,7 @@ async function saveNewSong() {
     showToast(`Saved "${title}" locally`);
   }
 
+  document.getElementById("edit-song-id").value = "";
   document.getElementById("new-song-url").value = "";
   document.getElementById("new-song-title").value = "";
   document.getElementById("new-song-audio").value = "";

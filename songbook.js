@@ -299,6 +299,7 @@ window.CarolSongbook = (function () {
 
     const tabsEl = document.getElementById("song-tabs");
     const boxEl = document.getElementById("song-lyrics-box");
+    const editBtn = document.getElementById("btn-edit-song");
     const delBtn = document.getElementById("btn-delete-song");
     const karaokeBar = document.getElementById("karaoke-player-bar");
 
@@ -318,6 +319,10 @@ window.CarolSongbook = (function () {
       boxEl.textContent = current.lyrics || "";
     }
 
+    if (editBtn) {
+      const canEdit = isAdmin || current.localOnly;
+      editBtn.style.display = canEdit ? "inline-flex" : "none";
+    }
     if (delBtn) {
       const canDelete = isAdmin || current.localOnly;
       delBtn.style.display = canDelete ? "inline-flex" : "none";

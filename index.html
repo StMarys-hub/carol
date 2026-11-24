@@ -199,13 +199,15 @@
           <button class="icon-btn" onclick="CarolSongbook.adjustFont(0.12)" title="Larger text">A+</button>
         </div>
         <div class="song-font-btns">
+          <button id="btn-edit-song" class="icon-btn" onclick="openEditCurrentSong()" title="Edit Song / Audio URL" style="display: none;">✏️ Edit</button>
           <button id="btn-delete-song" class="icon-btn" onclick="deleteCurrentSong()" title="Delete Song" style="display: none; color: var(--accent-crimson-soft); border-color: var(--accent-crimson);">🗑️</button>
           <button class="icon-btn" onclick="toggleAddSongPanel()">+ Add Song</button>
         </div>
       </div>
 
-      <!-- Add Song Panel on TOP -->
+      <!-- Add / Edit Song Panel on TOP -->
       <div id="add-song-panel" class="add-song-panel">
+        <input type="hidden" id="edit-song-id" />
         <div class="form-group">
           <label for="new-song-url">🔗 Import from madely.us / Lyrics URL</label>
           <div style="display: flex; gap: 8px;">
@@ -653,9 +655,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=22" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=22" charset="UTF-8"></script>
-  <script src="./songbook.js?v=22" charset="UTF-8"></script>
-  <script src="./app.js?v=22" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=23" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=23" charset="UTF-8"></script>
+  <script src="./songbook.js?v=23" charset="UTF-8"></script>
+  <script src="./app.js?v=23" charset="UTF-8"></script>
 </body>
 </html>
