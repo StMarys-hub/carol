@@ -676,7 +676,49 @@ let mapZoom = 1;
 let mapPanX = 0;
 let mapPanY = 0;
 let mapDrag = null;
+let mapFullscreen = false;
+let mapShowLabels = false;
 let lastMapRenderArgs = null;
+
+function toggleMapFullscreen() {
+  mapFullscreen = !mapFullscreen;
+  const wrap = document.getElementById("route-svg-wrap");
+  const btn = document.getElementById("btn-map-fullscreen");
+  if (wrap) wrap.classList.toggle("fullscreen", mapFullscreen);
+  if (btn) {
+    btn.textContent = mapFullscreen ? "✕" : "⛶";
+    btn.title = mapFullscreen ? "Restore Map" : "Full Screen Map";
+    btn.classList.toggle("active", mapFullscreen);
+  }
+  rerenderRouteMapOnly();
+}
+
+function toggleMapLabels() {
+  mapShowLabels = !mapShowLabels;
+  const btn = document.getElementById("btn-map-labels");
+  if (btn) btn.classList.toggle("active", mapShowLabels);
+  rerenderRouteMapOnly();
+}
+
+function selectMapPin(stopId) {
+  if (!lastMapRenderArgs) return;
+  const stop = (lastMapRenderArgs.computed || []).find((s) => s.id === stopId);
+  const bar = document.getElementById("map-pin-bar");
+  if (!stop || !bar) return;
+  const navUrl = getNavUrl(stop.address, stop.lat, stop.lng);
+  bar.innerHTML = `
+    <div style="min-width:0;flex:1;">
+      <div style="font-weight:900;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#${stop.index + 1} ${escapeHtml(stop.family_name)}</div>
+      <div style="font-size:0.74rem;color:var(--text-muted);">${stop.arrivalFormatted} – ${stop.departureFormatted} • ${escapeHtml(stop.distance_label || "Start")}</div>
+    </div>
+    <div style="display:flex;gap:5px;flex-shrink:0;">
+      <a class="mini-btn mint" href="${navUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🧭 Go</a>
+      ${!mapFullscreen ? `<button class="mini-btn" onclick="jumpToStop('${stop.id}')">View</button>` : ""}
+      <button class="mini-btn" onclick="document.getElementById('map-pin-bar').classList.remove('visible')">✕</button>
+    </div>
+  `;
+  bar.classList.add("visible");
+}
 
 function rerenderRouteMapOnly() {
   if (!lastMapRenderArgs) return;
@@ -903,16 +945,30 @@ function renderOfflineRouteSvg(computed, nextIndex) {
       ? (isLight ? "#991B1B" : "#FCA5A5")
       : (isLight ? "#0369A1" : "#38BDF8");
     activePinsSvg += `
-      <g style="cursor:pointer;" onclick="jumpToStop('${s.id}')">
+      <g style="cursor:pointer;" onclick="selectMapPin('${s.id}')">
         <title>#${idx + 1} ${escapeHtml(s.family_name)} — ${escapeHtml(s.address)}</title>
         ${isCur ? `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="15.5" fill="rgba(245,158,11,0.3)" />` : ""}
         <circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="${isCur ? 11.2 : 9.6}" fill="${fill}" stroke="${stroke}" stroke-width="2" />
         <text x="${p.x.toFixed(1)}" y="${(p.y + 3.4).toFixed(1)}" text-anchor="middle" fill="${isCur ? "#000" : "#FFF"}" font-size="9.5" font-weight="900" font-family="sans-serif">${idx + 1}</text>
+        ${mapShowLabels ? `<text x="${(p.x + 13).toFixed(1)}" y="${(p.y + 3).toFixed(1)}" fill="${isLight ? "#0F172A" : "#F8FAFC"}" font-size="8.2" font-weight="800" font-family="sans-serif">${escapeHtml((s.family_name || "").split(/[&,]/)[0].trim())}</text>` : ""}
       </g>
     `;
   });
 
-  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:240px;" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}</svg>`;
+  // Live "You Are Here" blue pulsing GPS dot when Near Me is active
+  let userDotSvg = "";
+  if (userCoords && typeof userCoords.lat === "number" && typeof userCoords.lng === "number") {
+    const up = project(userCoords.lat, userCoords.lng);
+    userDotSvg = `
+      <g>
+        <title>Your Current Location</title>
+        <circle cx="${up.x.toFixed(1)}" cy="${up.y.toFixed(1)}" r="11" fill="rgba(56,189,248,0.28)" />
+        <circle cx="${up.x.toFixed(1)}" cy="${up.y.toFixed(1)}" r="5" fill="#38BDF8" stroke="#FFFFFF" stroke-width="2" />
+      </g>
+    `;
+  }
+
+  return `<svg viewBox="0 0 ${W} ${H}" style="display:block;width:100%;height:auto;max-height:${mapFullscreen ? "100%" : "240px"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}${userDotSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
@@ -2708,9 +2764,13 @@ function saveUserSettings() {
   showToast("Settings saved");
 }
 
-// Close ANY open modal/popup with Escape key
+// Close ANY open modal/popup or Full Screen Map with Escape key
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
+    if (mapFullscreen) {
+      toggleMapFullscreen();
+      return;
+    }
     document.querySelectorAll(".modal-backdrop.open").forEach((m) => {
       if (m.id === "songbook-modal") closeSongbookModal();
       else m.classList.remove("open");
