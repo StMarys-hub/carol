@@ -1589,8 +1589,7 @@ function shareWhatsAppStatus() {
 }
 
 function sendHostHeadsUp(family, etaStr) {
-  const wShort = CFG.WARDS[activeWardId].short;
-  const msg = `🎄 Hi ${family}! ${wShort} Carol is on the way — our current ETA to your home is ${etaStr}. See you soon! 🎶`;
+  const msg = `🎄 Hi ${family}! Christmas Carol is on the way — our current ETA to your home is ${etaStr}. See you soon! 🎶`;
   copyText(msg, `Heads-up copied for ${family}!`);
   window.open(`https://wa.me/?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
 }
