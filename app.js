@@ -319,6 +319,7 @@ async function syncActiveWardOnline(silent = false) {
     selectDefaultDay();
     showDashboard();
     subscribeRealtime();
+    ensureActiveDayRealRoadLegs();
     if (!silent) showToast(`Synced ${CFG.WARDS[activeWardId].short} live schedule`);
   } catch (err) {
     // Offline between houses: continue serving already-unlocked cached route seamlessly
@@ -586,6 +587,18 @@ function selectDefaultDay() {
   activeDayId = upcoming ? upcoming.id : days[0].id;
 }
 
+const refreshedDayRoadLegs = new Set();
+
+async function ensureActiveDayRealRoadLegs() {
+  if (!wardPayload || !activeDayId || refreshedDayRoadLegs.has(activeDayId)) return;
+  const houses = getDayHouses(activeDayId);
+  if (houses.length < 2) return;
+  refreshedDayRoadLegs.add(activeDayId);
+  await window.CarolOptimizer.refreshRouteLegsWithTraffic(houses, "afternoon");
+  localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
+  render();
+}
+
 function switchDay(dayId) {
   activeDayId = dayId;
   searchQuery = "";
@@ -593,6 +606,7 @@ function switchDay(dayId) {
   if (searchEl) searchEl.value = "";
   document.getElementById("search-clear").classList.remove("visible");
   render();
+  ensureActiveDayRealRoadLegs();
 }
 
 function timeStrToMinutes(hhmm) {

@@ -154,8 +154,9 @@ window.CarolOptimizer = (function () {
   }
 
   /**
-   * Realistic Charlotte suburban traffic multiplier:
-   * - "afternoon" (default carol planning): 1.35x + 2 min light/parking buffer
+   * Calibrated Charlotte suburban traffic multiplier over OSRM road duration
+   * (OSRM already models ~24 mph suburban average; avoid double-penalizing):
+   * - "afternoon" (default carol schedule): 1.12x + 1 min pull-out/parking buffer
    * - "now" (Shift to Now): dynamic based on current local time-of-day traffic
    */
   function getTrafficProfile(mode = "afternoon", nowDate = new Date()) {
@@ -165,18 +166,17 @@ window.CarolOptimizer = (function () {
       const isWeekend = day === 0 || day === 6;
 
       if ((h >= 15.5 && h < 18.75) || (!isWeekend && h >= 7 && h < 9.5)) {
-        return { mult: 1.48, bufferMins: 2, label: "Peak Traffic" };
+        return { mult: 1.22, bufferMins: 1, label: "Peak Traffic" };
       }
       if (h >= 11.5 && h < 15.5) {
-        return { mult: 1.32, bufferMins: 2, label: "Afternoon Traffic" };
+        return { mult: 1.12, bufferMins: 1, label: "Afternoon Traffic" };
       }
       if (h >= 18.75 && h < 21.5) {
-        return { mult: 1.22, bufferMins: 2, label: "Evening Traffic" };
+        return { mult: 1.06, bufferMins: 1, label: "Evening Traffic" };
       }
-      return { mult: 1.1, bufferMins: 1, label: "Light Traffic" };
+      return { mult: 1.0, bufferMins: 0, label: "Light Traffic" };
     }
-    // Default planning profile: realistic Saturday afternoon / holiday traffic
-    return { mult: 1.35, bufferMins: 2, label: "Afternoon Traffic" };
+    return { mult: 1.12, bufferMins: 1, label: "Afternoon Traffic" };
   }
 
   function recomputeLegEstimates(ordered, mode = "afternoon") {
@@ -196,10 +196,10 @@ window.CarolOptimizer = (function () {
           distance_label: `${walkMins} min walk (${mi.toFixed(2)} mi)`
         };
       }
-      const roadMi = mi * 1.28;
-      // Base suburban Charlotte road speed (~26 mph) scaled by afternoon/current traffic + parking buffer
-      const baseMins = roadMi * 2.3;
-      const driveMins = Math.max(3, Math.round(baseMins * profile.mult + profile.bufferMins));
+      // Calibrated to match South Charlotte road-network factor (~1.48x straight line, ~2.55 min/mi)
+      const roadMi = mi * 1.48;
+      const baseMins = roadMi * 2.55;
+      const driveMins = Math.max(2, Math.round(baseMins * profile.mult + profile.bufferMins));
       return {
         ...h,
         stop_order: idx,
