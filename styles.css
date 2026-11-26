@@ -1385,6 +1385,45 @@ textarea {
   background: var(--bg-surface-elevated);
 }
 
+/* Live Sync & Coordinator Status Pill */
+.sync-pill-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 6px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+.sync-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+}
+.sync-badge.coord {
+  background: var(--accent-crimson-bg);
+  border-color: var(--accent-crimson);
+  color: var(--accent-crimson-soft);
+}
+.sync-badge.live {
+  color: var(--accent-mint);
+  border-color: rgba(52, 211, 153, 0.35);
+}
+
+/* Print Backup Sheet Styles */
+@media print {
+  body { background: #fff !important; color: #000 !important; padding: 0 !important; }
+  .sticky-header, .live-controls, .search-bar-wrap, .snapshot-bar, .ward-footer,
+  .bottom-install-bar, .hero-actions, .card-actions, .reorder-controls, .modal-backdrop { display: none !important; }
+  .stop-card, .hero-card { border: 1px solid #999 !important; background: #fff !important; color: #000 !important; page-break-inside: avoid; margin-bottom: 8px !important; }
+  .family-name, .address-line, .time-window, .seq-badge { color: #000 !important; }
+}
+
 .toast {
   position: fixed;
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));

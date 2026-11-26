@@ -101,6 +101,7 @@ let realtimeChannel = null;
 let activeWardId = resolveInitialWard();
 let wardPayload = null;        // Unlocked data for activeWardId
 let activeDayId = null;
+let lastSyncedAt = null;
 let adminSession = { unlocked: false, code: "", role: null, wardId: null };
 let parsedImportRows = [];
 let optimizerDraft = [];
@@ -314,6 +315,7 @@ async function syncActiveWardOnline(silent = false) {
     }
 
     setOfflineBanner(false);
+    lastSyncedAt = new Date();
     wardPayload = data;
     localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(data));
     selectDefaultDay();
@@ -527,8 +529,38 @@ function applyUiPrefs() {
   const themeBtn = document.getElementById("btn-theme");
   if (themeBtn) themeBtn.textContent = prefs.lightTheme ? "☀️" : "🌙";
 
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
   const adminBtn = document.getElementById("btn-admin-open");
-  if (adminBtn) adminBtn.classList.toggle("admin-unlocked", adminSession.unlocked && adminSession.wardId === activeWardId);
+  if (adminBtn) adminBtn.classList.toggle("admin-unlocked", isAdmin);
+
+  const roleBadge = document.getElementById("role-mode-badge");
+  if (roleBadge) {
+    roleBadge.style.display = isAdmin ? "inline-flex" : "none";
+    roleBadge.className = "sync-badge coord";
+  }
+
+  const bcBtn = document.getElementById("btn-broadcast-live");
+  const fullBtn = document.getElementById("btn-copy-full-day");
+  if (bcBtn && fullBtn) {
+    bcBtn.style.display = isAdmin ? "flex" : "none";
+    fullBtn.style.display = isAdmin ? "none" : "flex";
+  }
+
+  const syncEl = document.getElementById("sync-status-badge");
+  if (syncEl) {
+    const isOff = document.getElementById("offline-banner")?.classList.contains("visible");
+    if (isOff) {
+      syncEl.textContent = "📡 Offline (Saved Route)";
+      syncEl.className = "sync-badge";
+    } else if (lastSyncedAt) {
+      const t = minutesToTimeStr(lastSyncedAt.getHours() * 60 + lastSyncedAt.getMinutes());
+      syncEl.textContent = `🟢 Synced ${t}`;
+      syncEl.className = "sync-badge live";
+    } else {
+      syncEl.textContent = "🟢 Live";
+      syncEl.className = "sync-badge live";
+    }
+  }
 }
 
 function toggleLargePrint() {
@@ -1377,9 +1409,14 @@ function render() {
     }
     const navUrl = getNavUrl(currentStop.address, currentStop.lat, currentStop.lng);
     const isWalk = (currentStop.distance_label || "").toLowerCase().includes("walk");
+    const isAdminNow = adminSession.unlocked && adminSession.wardId === activeWardId;
     const callHtml = currentStop.phone
       ? `<a class="footer-chip" href="tel:${escapeHtml(currentStop.phone.replace(/[^\d+]/g, ""))}">📞 Call Host</a>`
       : "";
+    const skipHtml =
+      isAdminNow && !currentStop.isLast && currentStop.stop_role !== "END"
+        ? `<button class="footer-chip" onclick="skipHouseForLater('${currentStop.id}')">⏭️ Skip / Revisit Later</button>`
+        : "";
     const upNextHtml = upNextStop
       ? `<div class="up-next-strip"><span>⏭️ <strong>Up Next (#${upNextStop.index + 1}):</strong> ${escapeHtml(upNextStop.family_name)}</span><span>ETA ${upNextStop.arrivalFormatted}</span></div>`
       : "";
@@ -1393,7 +1430,7 @@ function render() {
         <div class="hero-family">${escapeHtml(currentStop.family_name)}</div>
         <div class="hero-address" onclick="copyText('${escapeJs(currentStop.address)}', 'Address copied!')">📍 ${escapeHtml(currentStop.address)}</div>
         ${currentStop.notes ? `<div class="hero-notes">${escapeHtml(currentStop.notes)}</div>` : ""}
-        ${callHtml ? `<div style="margin-bottom: 9px;">${callHtml}</div>` : ""}
+        ${callHtml || skipHtml ? `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:9px;">${callHtml}${skipHtml}</div>` : ""}
         <div class="hero-actions">
           <a class="btn-car btn-go-primary" href="${navUrl}" target="_blank" rel="noopener">${isWalk ? "🚶 Walk" : "🧭 Navigate"}</a>
           <button id="hero-timer-btn" class="btn-car btn-timer-hero" onclick="toggleHouseTimer('${currentStop.id}', ${currentStop.duration})">⏱️ ${currentStop.duration}m Timer</button>
@@ -1569,8 +1606,112 @@ async function shiftScheduleToNow() {
   const adjusted = (((nowMins - elapsed) % 1440) + 1440) % 1440;
   activeDay.start_time = `${String(Math.floor(adjusted / 60)).padStart(2, "0")}:${String(adjusted % 60).padStart(2, "0")}`;
   localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
-  render();
-  showToast(`⏱️ Shifted to ${minutesToTimeStr(nowMins)} (${profile.label})`);
+
+  // If Coordinator/Admin is unlocked, persist shifted time & legs to Supabase and broadcast to all connected phones
+  if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient) {
+    await sbClient.rpc("admin_upsert_carol_day", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: activeDay.season_id,
+      p_day_id: activeDay.id,
+      p_day_number: activeDay.day_number,
+      p_label: activeDay.label,
+      p_carol_date: activeDay.carol_date || null,
+      p_start_time: activeDay.start_time,
+      p_avg_visit_mins: activeDay.avg_visit_mins || 20,
+      p_drive_buffer_mins: activeDay.drive_buffer_mins || 5
+    });
+    await sbClient.rpc("admin_save_house_order", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_carol_day_id: activeDay.id,
+      p_ordered_houses: houses
+    });
+    broadcastPiiFreeEtaShift(activeDay.id, nextIdx, now.toISOString());
+    render();
+    showToast(`⏱️ Synced live schedule to ${minutesToTimeStr(nowMins)} (${profile.label})`);
+  } else {
+    render();
+    showToast(`⏱️ Local preview shifted to ${minutesToTimeStr(nowMins)} (${profile.label})`);
+  }
+}
+
+async function skipHouseForLater(houseId) {
+  if (!adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient) return;
+  const houses = getDayHouses(activeDayId);
+  const idx = houses.findIndex((h) => h.id === houseId);
+  if (idx === -1) return;
+  const h = houses[idx];
+  if (!window.confirm(`Skip "${h.family_name}" for now and move before the Final Stop to revisit later?`)) return;
+
+  const [moved] = houses.splice(idx, 1);
+  moved.notes = moved.notes && !moved.notes.includes("Revisit")
+    ? `⏭️ Revisit Later • ${moved.notes}`
+    : (moved.notes || "⏭️ Revisit Later (Not home earlier)");
+  const endIdx = houses.findIndex((x) => x.stop_role === "END");
+  const insertPos = endIdx !== -1 ? endIdx : houses.length;
+  houses.splice(insertPos, 0, moved);
+
+  const updated = window.CarolOptimizer.recomputeLegEstimates(houses, "afternoon");
+  await window.CarolOptimizer.refreshRouteLegsWithTraffic(updated, "afternoon");
+
+  if (wardPayload && wardPayload.active_season) {
+    const { data } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: activeDayId,
+      p_houses: updated,
+      p_replace_day: true
+    });
+    if (data && data.ok) {
+      await syncActiveWardOnline(true);
+      broadcastPiiFreeEtaShift(activeDayId, idx, new Date().toISOString());
+      showToast(`⏭️ Moved ${moved.family_name} to #${insertPos + 1} (Revisit Later)`);
+    }
+  }
+}
+
+async function resetDayCheckIns() {
+  const dayId = document.getElementById("opt-day-select")?.value || activeDayId;
+  if (!dayId || !adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient) return;
+  if (!window.confirm("Reset all check-ins on this carol day back to 0 visited?")) return;
+
+  const houses = getDayHouses(dayId);
+  if (!houses.length || !wardPayload?.active_season) return;
+  const cleared = houses.map((h) => ({ ...h, visited: false, checked_in_at: null }));
+  const { data } = await sbClient.rpc("admin_bulk_save_houses", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_season_id: wardPayload.active_season.id,
+    p_carol_day_id: dayId,
+    p_houses: cleared,
+    p_replace_day: true
+  });
+  if (data && data.ok) {
+    await syncActiveWardOnline(true);
+    broadcastPiiFreeEtaShift(dayId, 0, new Date().toISOString());
+    populateAdminControls();
+    showToast("🔄 All check-ins reset to 0!");
+  }
+}
+
+function copyFullDaySchedule() {
+  const activeDay = getDays().find((d) => d.id === activeDayId);
+  if (!activeDay) return;
+  const { computed, totalTravelMins, totalMiles } = calculateSchedule(activeDay, getDayHouses(activeDay.id));
+  if (!computed.length) return showToast("No stops to copy");
+
+  const w = CFG.WARDS[activeWardId];
+  let txt = `🎄 *St. Mary's Christmas Carol — ${w.full}*\n📅 ${activeDay.label} (${computed.length} houses • ${totalMiles.toFixed(1)} mi • ~${totalTravelMins}m drive)\n\n`;
+  computed.forEach((s) => {
+    txt += `${s.index + 1}. *${s.family_name}* (${s.arrivalFormatted} – ${s.departureFormatted})${s.stop_role === "END" ? " 🍽️" : ""}\n   📍 ${s.address}\n`;
+  });
+  copyText(txt, "📋 Full day schedule copied to clipboard!");
+}
+
+function openQuickHelpModal() {
+  document.getElementById("quick-help-modal").classList.add("open");
 }
 
 function shareWhatsAppStatus() {
@@ -2990,6 +3131,11 @@ async function saveAdminWardSettings() {
 // ---------- Live Message Broadcast Popup ----------
 
 function openBroadcastModal() {
+  if (!adminSession.unlocked || adminSession.wardId !== activeWardId) {
+    showToast("🔐 Unlock Ward Admin first to broadcast announcements");
+    openAdminModal();
+    return;
+  }
   document.getElementById("broadcast-text-input").value = "";
   document.getElementById("broadcast-pin-banner").checked = true;
   document.getElementById("broadcast-modal").classList.add("open");
@@ -3219,7 +3365,12 @@ window.escapeHtml = function (str) {
     .replace(/"/g, "&quot;");
 };
 function escapeJs(str) {
-  return String(str || "").replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+  return String(str || "")
+    .replace(/\\/g, "\\\\")
+    .replace(/'/g, "\\'")
+    .replace(/"/g, "&quot;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 window.showToast = function (msg) {
   const t = document.getElementById("toast");

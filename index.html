@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=24" />
+  <link rel="stylesheet" href="./styles.css?v=28" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -41,6 +41,7 @@
           <button class="icon-btn" onclick="openSongbookModal()" title="Carol Songbook" aria-label="Carol Songbook">🎵</button>
           <button id="btn-theme" class="icon-btn" onclick="toggleTheme()" title="Night / Snow Theme" aria-label="Toggle Theme">🌙</button>
           <button id="btn-large-print" class="icon-btn" onclick="toggleLargePrint()" title="Large Print" aria-label="Large Print">Aa+</button>
+          <button class="icon-btn" onclick="openQuickHelpModal()" title="Quick Help" aria-label="Quick Help">?</button>
           <button id="btn-admin-open" class="icon-btn" onclick="openAdminModal()" title="Ward Admin Portal" aria-label="Ward Admin">🔐</button>
           <button class="icon-btn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙️</button>
         </div>
@@ -77,6 +78,10 @@
         </div>
         <div class="progress-track">
           <div class="progress-fill" id="progress-fill"></div>
+        </div>
+        <div class="sync-pill-row">
+          <span id="sync-status-badge" class="sync-badge live">🟢 Live</span>
+          <span id="role-mode-badge" class="sync-badge" style="display: none;">🔐 Coordinator Mode</span>
         </div>
       </div>
     </div>
@@ -154,7 +159,8 @@
         <button class="action-pill shift-now" onclick="shiftScheduleToNow()">⏱️ Shift to Now</button>
         <button class="action-pill share-eta" onclick="shareWhatsAppStatus()">💬 WhatsApp ETA</button>
         <button class="action-pill add-house" onclick="openAddHouseModal()">➕ Add House</button>
-        <button class="action-pill" onclick="openBroadcastModal()">📢 Broadcast</button>
+        <button id="btn-broadcast-live" class="action-pill" onclick="openBroadcastModal()" style="display: none;">📢 Broadcast</button>
+        <button id="btn-copy-full-day" class="action-pill" onclick="copyFullDaySchedule()">📋 Full Schedule</button>
       </div>
 
       <!-- Quick Search -->
@@ -181,8 +187,10 @@
           <a id="footer-call-btn" class="footer-chip" href="#" style="display: none;">📞 Call Coordinator</a>
           <a id="footer-sms-btn" class="footer-chip" href="#" style="display: none;">💬 Text Coordinator</a>
           <button id="btn-gps" class="footer-chip" onclick="toggleGpsTracking()">📍 Near Me</button>
+          <button class="footer-chip" onclick="copyFullDaySchedule()">📋 Copy Schedule</button>
+          <button class="footer-chip" onclick="window.print()">🖨️ Print Backup</button>
+          <button class="footer-chip" onclick="openQuickHelpModal()">❓ Help</button>
           <button class="footer-chip" onclick="openAdminModal()">🔐 Ward Admin</button>
-          <button class="footer-chip" onclick="openSongbookModal()">🎵 Songbook</button>
           <button class="footer-chip" onclick="lockCurrentWard()">🔒 Lock Ward</button>
         </div>
       </footer>
@@ -353,9 +361,10 @@
           <div class="admin-card">
             <div class="admin-card-title">
               <span>🏠 Manage Houses</span>
-              <div style="display: flex; gap: 6px;">
+              <div style="display: flex; gap: 6px; flex-wrap: wrap;">
                 <button class="mini-btn gold" onclick="runConstrainedOptimizer()">⚡ Auto-Sort Best Route</button>
                 <button class="mini-btn mint" onclick="saveOptimizedOrder()">💾 Save Order</button>
+                <button class="mini-btn danger" onclick="resetDayCheckIns()">🔄 Reset Check-Ins</button>
               </div>
             </div>
             <div class="form-group" style="margin-bottom: 10px;">
@@ -641,6 +650,25 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
     </div>
   </div>
 
+  <!-- Quick Help Guide Modal (For First-Time Carolers & Drivers) -->
+  <div id="quick-help-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'quick-help-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 520px;">
+      <div class="modal-header">
+        <h2>❓ How to Use St. Mary's Carol App</h2>
+        <button class="close-btn" onclick="closeModal('quick-help-modal')">✕ Close</button>
+      </div>
+      <div style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.55; display: flex; flex-direction: column; gap: 10px;">
+        <div><strong style="color: var(--accent-sky);">1. Navigate House-to-House:</strong> Tap <strong>🧭 Navigate</strong> on the top card to launch Google Maps (change to Apple Maps or Waze in <strong>⚙️ Settings</strong>).</div>
+        <div><strong style="color: var(--accent-gold);">2. Find Your House ETA:</strong> Type your family name or street in the <strong>🔍 Search</strong> bar to check when the carol group reaches your home.</div>
+        <div><strong style="color: var(--accent-mint);">3. Carol Songbook &amp; Karaoke:</strong> Tap <strong>🎵</strong> in the header for Malayalam &amp; English lyrics, <code>A-/A+</code> sizing, audio-only karaoke tracks, and <strong>+ Add / ✏️ Edit</strong> song requests.</div>
+        <div><strong style="color: var(--accent-purple);">4. Live ETAs &amp; Offline Support:</strong> ETAs automatically sync with your Ward Coordinator. Tap <strong>Install App</strong> at the bottom so the route &amp; lyrics stay available even in weak-signal areas.</div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-full btn-gold" onclick="closeModal('quick-help-modal')">✓ Got It</button>
+      </div>
+    </div>
+  </div>
+
   <!-- iPhone / Android Manual Install Guide Modal -->
   <div id="install-guide-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'install-guide-modal')">
     <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 460px;">
@@ -657,9 +685,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=27" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=27" charset="UTF-8"></script>
-  <script src="./songbook.js?v=27" charset="UTF-8"></script>
-  <script src="./app.js?v=27" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=28" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=28" charset="UTF-8"></script>
+  <script src="./songbook.js?v=28" charset="UTF-8"></script>
+  <script src="./app.js?v=28" charset="UTF-8"></script>
 </body>
 </html>
