@@ -2757,24 +2757,38 @@ function renderOptimizerList() {
   backfillSelectedDayIntoImporter(false);
 }
 
-function backfillSelectedDayIntoImporter(showNotice = false) {
-  const dayId = document.getElementById("opt-day-select")?.value;
+function backfillSelectedDayIntoImporter(showNotice = false, useImporterDropdown = false) {
+  const defaultDaySel = document.getElementById("imp-default-day");
+  const optDaySel = document.getElementById("opt-day-select");
   const ta = document.getElementById("imp-textarea");
   const replaceCb = document.getElementById("imp-replace-day");
-  const defaultDaySel = document.getElementById("imp-default-day");
-  if (!ta || !dayId) return;
+  if (!ta) return;
+
+  let dayId = "";
+  if (useImporterDropdown && defaultDaySel && defaultDaySel.selectedOptions && defaultDaySel.selectedOptions[0]) {
+    dayId = defaultDaySel.selectedOptions[0].dataset.id || "";
+    if (!dayId) {
+      const byLabel = getDays().find((d) => d.label === defaultDaySel.value);
+      if (byLabel) dayId = byLabel.id;
+    }
+  } else {
+    dayId = (optDaySel && optDaySel.value) || activeDayId || "";
+  }
+  if (!dayId) return;
 
   const dayObj = getDays().find((d) => d.id === dayId);
   const dayShort = dayObj ? `Day ${dayObj.day_number || 1}` : "Day 1";
   const houses = getDayHouses(dayId);
 
-  if (defaultDaySel && dayObj) {
+  if (defaultDaySel && dayObj && !useImporterDropdown) {
     defaultDaySel.value = dayObj.label;
   }
 
   if (!houses.length) {
     ta.value = "";
     if (replaceCb) replaceCb.checked = false;
+    document.getElementById("imp-status").textContent = `No houses yet in ${dayObj ? dayObj.label : dayShort}.`;
+    if (showNotice) showToast(`No houses yet in ${dayObj ? dayObj.label : dayShort}`);
     return;
   }
 
@@ -2788,7 +2802,7 @@ function backfillSelectedDayIntoImporter(showNotice = false) {
   document.getElementById("imp-preview-wrap").style.display = "none";
   document.getElementById("btn-geocode-save-import").disabled = true;
   document.getElementById("imp-status").textContent = `Loaded ${houses.length} houses from ${dayObj ? dayObj.label : dayShort} for bulk edit.`;
-  if (showNotice) showToast(`Loaded ${houses.length} houses into Bulk Editor`);
+  if (showNotice) showToast(`Loaded ${houses.length} houses from ${dayObj ? dayObj.label : dayShort}`);
 }
 
 function clearBulkImporter() {

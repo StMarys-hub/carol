@@ -377,7 +377,7 @@
             <div class="admin-card-title">
               <span>📥 Paste / Bulk Edit Houses</span>
               <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                <button class="mini-btn" onclick="backfillSelectedDayIntoImporter(true)">📋 Load Day</button>
+                <button class="mini-btn" onclick="backfillSelectedDayIntoImporter(true, true)">📋 Load Day</button>
                 <button class="mini-btn" onclick="clearBulkImporter()">🧹 Clear</button>
                 <button class="mini-btn" onclick="openFormatHelpModal()">? Format</button>
               </div>
@@ -385,7 +385,7 @@
             <div class="form-row">
               <div class="form-group">
                 <label for="imp-default-day">Default Day (if not in text)</label>
-                <select id="imp-default-day"></select>
+                <select id="imp-default-day" onchange="backfillSelectedDayIntoImporter(false, true)"></select>
               </div>
               <div class="form-group" style="display: flex; align-items: flex-end;">
                 <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; font-size: 0.82rem;">
@@ -684,9 +684,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=29" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=29" charset="UTF-8"></script>
-  <script src="./songbook.js?v=29" charset="UTF-8"></script>
-  <script src="./app.js?v=29" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=30" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=30" charset="UTF-8"></script>
+  <script src="./songbook.js?v=30" charset="UTF-8"></script>
+  <script src="./app.js?v=30" charset="UTF-8"></script>
 </body>
 </html>
