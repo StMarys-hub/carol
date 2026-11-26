@@ -375,8 +375,12 @@
 
           <div class="admin-card">
             <div class="admin-card-title">
-              <span>📥 Paste / Bulk Import Houses</span>
-              <button class="mini-btn" onclick="openFormatHelpModal()">? Sample Format</button>
+              <span>📥 Paste / Bulk Edit Houses</span>
+              <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                <button class="mini-btn" onclick="backfillSelectedDayIntoImporter(true)">📋 Load Day</button>
+                <button class="mini-btn" onclick="clearBulkImporter()">🧹 Clear</button>
+                <button class="mini-btn" onclick="openFormatHelpModal()">? Format</button>
+              </div>
             </div>
             <div class="form-row">
               <div class="form-group">
@@ -650,19 +654,14 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
     </div>
   </div>
 
-  <!-- Quick Help Guide Modal (For First-Time Carolers & Drivers) -->
+  <!-- Role-Based Quick Help Guide Modal (Parishioner vs Coordinator/Admin) -->
   <div id="quick-help-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'quick-help-modal')">
-    <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 520px;">
+    <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 540px;">
       <div class="modal-header">
-        <h2>❓ How to Use St. Mary's Carol App</h2>
+        <h2 id="quick-help-title">❓ How to Use St. Mary's Carol App</h2>
         <button class="close-btn" onclick="closeModal('quick-help-modal')">✕ Close</button>
       </div>
-      <div style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.55; display: flex; flex-direction: column; gap: 10px;">
-        <div><strong style="color: var(--accent-sky);">1. Navigate House-to-House:</strong> Tap <strong>🧭 Navigate</strong> on the top card to launch Google Maps (change to Apple Maps or Waze in <strong>⚙️ Settings</strong>).</div>
-        <div><strong style="color: var(--accent-gold);">2. Find Your House ETA:</strong> Type your family name or street in the <strong>🔍 Search</strong> bar to check when the carol group reaches your home.</div>
-        <div><strong style="color: var(--accent-mint);">3. Carol Songbook &amp; Karaoke:</strong> Tap <strong>🎵</strong> in the header for Malayalam &amp; English lyrics, <code>A-/A+</code> sizing, audio-only karaoke tracks, and <strong>+ Add / ✏️ Edit</strong> song requests.</div>
-        <div><strong style="color: var(--accent-purple);">4. Live ETAs &amp; Offline Support:</strong> ETAs automatically sync with your Ward Coordinator. Tap <strong>Install App</strong> at the bottom so the route &amp; lyrics stay available even in weak-signal areas.</div>
-      </div>
+      <div id="quick-help-body" style="font-size: 0.9rem; color: var(--text-secondary); line-height: 1.58; display: flex; flex-direction: column; gap: 10px;"></div>
       <div class="modal-footer">
         <button class="btn-full btn-gold" onclick="closeModal('quick-help-modal')">✓ Got It</button>
       </div>
@@ -685,9 +684,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=28" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=28" charset="UTF-8"></script>
-  <script src="./songbook.js?v=28" charset="UTF-8"></script>
-  <script src="./app.js?v=28" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=29" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=29" charset="UTF-8"></script>
+  <script src="./songbook.js?v=29" charset="UTF-8"></script>
+  <script src="./app.js?v=29" charset="UTF-8"></script>
 </body>
 </html>

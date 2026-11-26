@@ -1711,6 +1711,30 @@ function copyFullDaySchedule() {
 }
 
 function openQuickHelpModal() {
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  const titleEl = document.getElementById("quick-help-title");
+  const bodyEl = document.getElementById("quick-help-body");
+  if (!titleEl || !bodyEl) return;
+
+  if (isAdmin) {
+    titleEl.textContent = `🔐 Coordinator / Admin Guide (${CFG.WARDS[activeWardId].short})`;
+    bodyEl.innerHTML = `
+      <div><strong style="color: var(--accent-gold);">1. Live Check-Ins &amp; Shift to Now:</strong> Tap <strong>✓ Arrived</strong> or <strong>⏱️ Shift to Now</strong> to save live progress &amp; current-traffic ETAs to Supabase—every connected caroler's phone automatically snaps into sync.</div>
+      <div><strong style="color: var(--accent-sky);">2. Absent Family or Unplanned House:</strong> Tap <strong>⏭️ Skip / Revisit Later</strong> on the top card to move an absent family before Dinner, or <strong>➕ Add House</strong> to auto-insert an unplanned stop at the shortest detour.</div>
+      <div><strong style="color: var(--accent-mint);">3. Bulk Edit &amp; Auto-Sort Route:</strong> Open <strong>🔐 Admin → Houses &amp; Route</strong>. The selected day is pre-filled in <strong>Paste / Bulk Edit Houses</strong> for quick edits; tap <strong>⚡ Auto-Sort Best Route → 💾 Save Order</strong> to optimize with START/END pinned, or <strong>🔄 Reset Check-Ins</strong> after dry-run testing.</div>
+      <div><strong style="color: var(--accent-purple);">4. Songbook Approvals &amp; Karaoke:</strong> Open <strong>🎵 Songbook</strong> to review <strong>🔔 Pending Song Approvals</strong> (Preview / Approve / Reject), or tap <strong>✏️ Edit</strong> on any song to attach a YouTube or MP3 karaoke track.</div>
+      <div><strong style="color: var(--accent-crimson-soft);">5. Broadcast &amp; Ward Code Invite:</strong> Tap <strong>📢 Broadcast</strong> to pop up a live announcement on all phones, or go to <strong>🔐 Admin → Code &amp; Broadcast</strong> to reset the Ward PIN and share the 1-tap WhatsApp Invite.</div>
+    `;
+  } else {
+    titleEl.textContent = "❓ How to Use St. Mary's Carol App";
+    bodyEl.innerHTML = `
+      <div><strong style="color: var(--accent-sky);">1. Navigate House-to-House:</strong> Tap <strong>🧭 Navigate</strong> on the top card to open Google Maps (you can switch to Apple Maps or Waze in <strong>⚙️ Settings</strong>).</div>
+      <div><strong style="color: var(--accent-gold);">2. Find Your House ETA:</strong> Type your family name or street in the <strong>🔍 Search</strong> bar to see when the carol group will arrive at your home.</div>
+      <div><strong style="color: var(--accent-mint);">3. Route Map &amp; Zoom:</strong> Expand <strong>🗺️ Route Map</strong> to view all carol days together, pinch-to-zoom or tap <strong>⛶</strong> Full Screen, and tap <strong>Aa</strong> to see family names.</div>
+      <div><strong style="color: var(--accent-purple);">4. Carol Songbook &amp; Karaoke:</strong> Tap <strong>🎵</strong> in the header for Malayalam &amp; English lyrics, <code>A-/A+</code> sizing, audio-only karaoke playback, and <strong>+ Add / ✏️ Edit</strong> songs (kept for your session and sent for Coordinator approval).</div>
+      <div><strong style="color: var(--text-primary);">5. Offline Install &amp; Live Sync:</strong> Tap <strong>Install App</strong> at the bottom for offline carol-night reliability. ETAs update automatically whenever your Ward Coordinator checks in.</div>
+    `;
+  }
   document.getElementById("quick-help-modal").classList.add("open");
 }
 
@@ -2730,6 +2754,51 @@ function renderOptimizerList() {
   const dayId = document.getElementById("opt-day-select").value;
   optimizerDraft = getDayHouses(dayId).map((h) => ({ ...h }));
   drawOptimizerDraft();
+  backfillSelectedDayIntoImporter(false);
+}
+
+function backfillSelectedDayIntoImporter(showNotice = false) {
+  const dayId = document.getElementById("opt-day-select")?.value;
+  const ta = document.getElementById("imp-textarea");
+  const replaceCb = document.getElementById("imp-replace-day");
+  const defaultDaySel = document.getElementById("imp-default-day");
+  if (!ta || !dayId) return;
+
+  const dayObj = getDays().find((d) => d.id === dayId);
+  const dayShort = dayObj ? `Day ${dayObj.day_number || 1}` : "Day 1";
+  const houses = getDayHouses(dayId);
+
+  if (defaultDaySel && dayObj) {
+    defaultDaySel.value = dayObj.label;
+  }
+
+  if (!houses.length) {
+    ta.value = "";
+    if (replaceCb) replaceCb.checked = false;
+    return;
+  }
+
+  const header = "Family Name | Full Address | Carol Day | Stop Role | Phone / Notes";
+  const lines = houses.map((h) => {
+    const extra = [h.phone, h.notes].filter(Boolean).join(" • ");
+    return `${h.family_name} | ${h.address} | ${dayShort} | ${h.stop_role || ""} | ${extra}`;
+  });
+  ta.value = [header, ...lines].join("\n");
+  if (replaceCb) replaceCb.checked = true;
+  document.getElementById("imp-preview-wrap").style.display = "none";
+  document.getElementById("btn-geocode-save-import").disabled = true;
+  document.getElementById("imp-status").textContent = `Loaded ${houses.length} houses from ${dayObj ? dayObj.label : dayShort} for bulk edit.`;
+  if (showNotice) showToast(`Loaded ${houses.length} houses into Bulk Editor`);
+}
+
+function clearBulkImporter() {
+  const ta = document.getElementById("imp-textarea");
+  const replaceCb = document.getElementById("imp-replace-day");
+  if (ta) ta.value = "";
+  if (replaceCb) replaceCb.checked = false;
+  document.getElementById("imp-preview-wrap").style.display = "none";
+  document.getElementById("btn-geocode-save-import").disabled = true;
+  document.getElementById("imp-status").textContent = "Cleared — paste a new list from Excel, Sheets, or WhatsApp.";
 }
 
 function drawOptimizerDraft() {
