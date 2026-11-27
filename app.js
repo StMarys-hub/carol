@@ -3023,6 +3023,43 @@ async function deleteSingleHouse(houseId, familyName) {
   showToast(`Delete failed: ${(data && data.error) || (error && error.message) || "Error"}`);
 }
 
+async function clearAllHousesInSelectedDay() {
+  const dayId = document.getElementById("opt-day-select")?.value || activeDayId;
+  if (!dayId || !wardPayload || !wardPayload.active_season) {
+    return showToast("Select a carol day first");
+  }
+  const dayObj = getDays().find((d) => d.id === dayId);
+  const dayLabel = dayObj ? dayObj.label : "selected day";
+  const houses = getDayHouses(dayId);
+  if (!houses.length) {
+    return showToast(`No houses to clear in ${dayLabel}`);
+  }
+  if (!window.confirm(`Delete ALL ${houses.length} house(s) in "${dayLabel}"? This cannot be undone.`)) {
+    return;
+  }
+
+  const { data, error } = await sbClient.rpc("admin_bulk_save_houses", {
+    p_ward_id: activeWardId,
+    p_admin_code: adminSession.code,
+    p_season_id: wardPayload.active_season.id,
+    p_carol_day_id: dayId,
+    p_houses: [],
+    p_replace_day: true
+  });
+
+  if (!error && data && data.ok) {
+    if (dayId === activeDayId && typeof stopHouseTimer === "function") {
+      stopHouseTimer(true);
+    }
+    await syncActiveWardOnline(true);
+    broadcastPiiFreeEtaShift(dayId, 0, new Date().toISOString());
+    populateAdminControls();
+    showToast(`🗑️ Cleared all ${houses.length} house(s) from ${dayLabel}`);
+  } else {
+    showToast(`Clear failed: ${(data && data.error) || (error && error.message) || "Error"}`);
+  }
+}
+
 function moveOptDraft(idx, delta) {
   const target = idx + delta;
   if (target < 0 || target >= optimizerDraft.length) return;
