@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=40" />
+  <link rel="stylesheet" href="./styles.css?v=41" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -89,13 +89,16 @@
 
   <main class="container">
     <!-- Christmas Lock Screen (Zero PII shown until verified via Supabase RPC) -->
-    <section id="lock-screen-view" class="lock-screen">
+    <section id="lock-screen-view" class="lock-screen" style="display: none;">
       <div class="lock-icon">🌟</div>
       <div class="lock-ward-badge" id="lock-ward-badge">Ward 4 – Blessed Kunjachan</div>
       <h2>Enter Ward Access Code</h2>
       <p id="lock-subtitle">Family names, addresses, and live carol ETAs are protected for St. Mary's parishioners.</p>
 
       <form onsubmit="handleUnlockSubmit(event)">
+        <div style="margin-bottom: 10px;">
+          <select id="lock-ward-select" class="lock-ward-select" onchange="switchWard(this.value)" aria-label="Select Your Ward"></select>
+        </div>
         <div class="pw-wrap" style="margin-bottom: 12px;">
           <input
             type="password"
@@ -740,9 +743,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=40" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=40" charset="UTF-8"></script>
-  <script src="./songbook.js?v=40" charset="UTF-8"></script>
-  <script src="./app.js?v=40" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=41" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=41" charset="UTF-8"></script>
+  <script src="./songbook.js?v=41" charset="UTF-8"></script>
+  <script src="./app.js?v=41" charset="UTF-8"></script>
 </body>
 </html>

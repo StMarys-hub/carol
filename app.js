@@ -180,8 +180,16 @@ function resolveInitialWard() {
     localStorage.setItem("carol_active_ward", qWard);
     return qWard;
   }
-  const saved = (localStorage.getItem("carol_active_ward") || "W4").toUpperCase();
-  return CFG.WARDS[saved] ? saved : "W4";
+  const saved = (localStorage.getItem("carol_active_ward") || "").toUpperCase();
+  if (CFG.WARDS[saved]) return saved;
+
+  // If user previously unlocked any ward (e.g., opened installed PWA without ?ward=), resume that ward automatically
+  const unlockedWard = Object.keys(CFG.WARDS).find((wId) => !!localStorage.getItem(keyUserCode(wId)));
+  if (unlockedWard) {
+    localStorage.setItem("carol_active_ward", unlockedWard);
+    return unlockedWard;
+  }
+  return "W4";
 }
 
 function keyUserCode(wardId) {
@@ -263,7 +271,8 @@ async function bootActiveWard() {
     return;
   }
 
-  // If cached route exists, render immediately for instant field startup, then silently revalidate online
+  // If cached route exists, render immediately for instant field startup; otherwise keep lock screen hidden while syncing
+  let renderedFromCache = false;
   if (cachedRouteRaw) {
     try {
       const cached = JSON.parse(cachedRouteRaw);
@@ -271,8 +280,19 @@ async function bootActiveWard() {
         wardPayload = cached;
         selectDefaultDay();
         showDashboard();
+        renderedFromCache = true;
       }
     } catch (e) {}
+  }
+
+  if (!renderedFromCache) {
+    document.getElementById("lock-screen-view").style.display = "none";
+    document.getElementById("dashboard-view").style.display = "block";
+    document.getElementById("unlocked-header-stats").style.display = "block";
+    const heroEl = document.getElementById("hero-spotlight");
+    if (heroEl) {
+      heroEl.innerHTML = `<section class="hero-card"><div class="hero-family">Loading ${escapeHtml(CFG.WARDS[activeWardId].short)} schedule...</div><div class="hero-address">Syncing live route from St. Mary's Carol server.</div></section>`;
+    }
   }
 
   await syncActiveWardOnline(true);
@@ -324,12 +344,17 @@ async function syncActiveWardOnline(silent = false) {
     ensureActiveDayRealRoadLegs();
     if (!silent) showToast(`Synced ${CFG.WARDS[activeWardId].short} live schedule`);
   } catch (err) {
-    // Offline between houses: continue serving already-unlocked cached route seamlessly
+    // Offline or flaky signal: NEVER kick a returning user with a saved code back to the Lock Screen
+    setOfflineBanner(true);
     if (wardPayload) {
-      setOfflineBanner(true);
       if (!silent) showToast("Offline — using saved route");
     } else {
-      showLockScreen("Unable to reach server. Check internet connection or Supabase settings.");
+      document.getElementById("lock-screen-view").style.display = "none";
+      document.getElementById("dashboard-view").style.display = "block";
+      const heroEl = document.getElementById("hero-spotlight");
+      if (heroEl) {
+        heroEl.innerHTML = `<section class="hero-card"><div class="hero-family">📡 Unable to reach server</div><div class="hero-address">Your Ward Access Code is saved. Check your internet connection and tap Retry above.</div></section>`;
+      }
     }
   }
 }
@@ -369,6 +394,7 @@ async function handleUnlockSubmit(e) {
       return;
     }
 
+    localStorage.setItem("carol_active_ward", activeWardId);
     localStorage.setItem(keyUserCode(activeWardId), code);
     localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(data));
     input.value = "";
@@ -587,6 +613,15 @@ function updateWardHeaderLabels() {
   const w = CFG.WARDS[activeWardId];
   const sel = document.getElementById("ward-switcher");
   if (sel) sel.value = activeWardId;
+  const lockSel = document.getElementById("lock-ward-select");
+  if (lockSel) {
+    if (!lockSel.options.length) {
+      lockSel.innerHTML = Object.values(CFG.WARDS)
+        .map((ward) => `<option value="${ward.id}">${escapeHtml(ward.full)}</option>`)
+        .join("");
+    }
+    lockSel.value = activeWardId;
+  }
   document.getElementById("header-ward-title").textContent = w.full;
   document.getElementById("lock-ward-badge").textContent = w.full;
   document.getElementById("footer-ward-title").textContent = `⛪ ${CFG.churchName} • ${w.full}`;

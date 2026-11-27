@@ -407,6 +407,19 @@ body {
   outline: none;
   border-color: var(--accent-gold);
 }
+.lock-ward-select {
+  width: 100%;
+  padding: 10px 12px;
+  border-radius: var(--radius-md);
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-surface-elevated);
+  color: var(--text-primary);
+  font-size: 0.9rem;
+  font-weight: 800;
+  text-align: center;
+  font-family: inherit;
+  cursor: pointer;
+}
 .lock-error {
   color: var(--accent-crimson-soft);
   font-size: 0.84rem;
