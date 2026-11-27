@@ -593,8 +593,7 @@ body {
 }
 .map-pin-bar {
   display: none;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 8px;
   margin-top: 8px;
   padding: 8px 10px;
@@ -605,6 +604,40 @@ body {
 }
 .map-pin-bar.visible {
   display: flex;
+}
+.map-pin-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+}
+.map-pin-move {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding-top: 7px;
+  border-top: 1px solid var(--border-subtle);
+  width: 100%;
+}
+.map-pin-move label {
+  font-size: 0.76rem;
+  font-weight: 800;
+  color: var(--accent-gold);
+  white-space: nowrap;
+}
+.map-pin-move select {
+  flex: 1;
+  min-width: 120px;
+  padding: 5px 8px;
+  border-radius: 7px;
+  border: 1.5px solid var(--border-strong);
+  background: var(--bg-input);
+  color: var(--text-primary);
+  font-size: 0.8rem;
+  font-weight: 700;
+  font-family: inherit;
 }
 .route-svg-legend {
   display: flex;

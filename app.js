@@ -759,18 +759,127 @@ function selectMapPin(stopId) {
   const bar = document.getElementById("map-pin-bar");
   if (!stop || !bar) return;
   const navUrl = getNavUrl(stop.address, stop.lat, stop.lng);
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  const days = getDays();
+  const moveHtml =
+    isAdmin && days.length > 1
+      ? `
+        <div class="map-pin-move">
+          <label for="map-pin-day-select">📅 Assign Day:</label>
+          <select id="map-pin-day-select" aria-label="Reassign house to another Carol Day">
+            ${days
+              .map(
+                (d) =>
+                  `<option value="${d.id}" ${d.id === stop.carol_day_id ? "selected" : ""}>${escapeHtml(d.label)}</option>`
+              )
+              .join("")}
+          </select>
+          <button id="btn-map-pin-move" class="mini-btn gold" onclick="moveMapPinHouseToDay('${stop.id}')">💾 Save Day</button>
+        </div>
+      `
+      : "";
+
   bar.innerHTML = `
-    <div style="min-width:0;flex:1;">
-      <div style="font-weight:900;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#${stop.index + 1} ${escapeHtml(stop.family_name)}</div>
-      <div style="font-size:0.74rem;color:var(--text-muted);">${stop.arrivalFormatted} – ${stop.departureFormatted} • ${escapeHtml(stop.distance_label || "Start")}</div>
+    <div class="map-pin-top">
+      <div style="min-width:0;flex:1;">
+        <div style="font-weight:900;color:var(--text-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">#${stop.index + 1} ${escapeHtml(stop.family_name)}</div>
+        <div style="font-size:0.74rem;color:var(--text-muted);">${stop.arrivalFormatted} – ${stop.departureFormatted} • ${escapeHtml(stop.distance_label || "Start")}</div>
+      </div>
+      <div style="display:flex;gap:5px;flex-shrink:0;">
+        <a class="mini-btn mint" href="${navUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🧭 Go</a>
+        ${!mapFullscreen ? `<button class="mini-btn" onclick="jumpToStop('${stop.id}')">View</button>` : ""}
+        <button class="mini-btn" onclick="document.getElementById('map-pin-bar').classList.remove('visible')">✕</button>
+      </div>
     </div>
-    <div style="display:flex;gap:5px;flex-shrink:0;">
-      <a class="mini-btn mint" href="${navUrl}" target="_blank" rel="noopener" style="text-decoration:none;">🧭 Go</a>
-      ${!mapFullscreen ? `<button class="mini-btn" onclick="jumpToStop('${stop.id}')">View</button>` : ""}
-      <button class="mini-btn" onclick="document.getElementById('map-pin-bar').classList.remove('visible')">✕</button>
-    </div>
+    ${moveHtml}
   `;
   bar.classList.add("visible");
+}
+
+async function moveMapPinHouseToDay(houseId) {
+  if (!adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient || !wardPayload?.active_season) {
+    return showToast("Unlock 🔐 Admin first to reassign days");
+  }
+  const newDayId = document.getElementById("map-pin-day-select")?.value || "";
+  const existing = (wardPayload.ward_houses || []).find((x) => x.id === houseId);
+  if (!existing || !newDayId) return;
+  if (newDayId === existing.carol_day_id) {
+    return showToast("Already assigned to this day");
+  }
+
+  const btn = document.getElementById("btn-map-pin-move");
+  if (btn) {
+    btn.disabled = true;
+    btn.textContent = "Saving...";
+  }
+
+  try {
+    const oldDayId = existing.carol_day_id;
+    const oldDayHouses = window.CarolOptimizer.recomputeLegEstimates(
+      getDayHouses(oldDayId).filter((h) => h.id !== houseId),
+      "afternoon"
+    );
+    if (oldDayHouses.length >= 2) {
+      await window.CarolOptimizer.refreshRouteLegsWithTraffic(oldDayHouses, "afternoon");
+    }
+
+    const targetDayHouses = getDayHouses(newDayId).map((h) => ({ ...h }));
+    const movedHouse = {
+      ...existing,
+      carol_day_id: newDayId,
+      visited: false,
+      checked_in_at: null
+    };
+    const coords =
+      typeof existing.lat === "number" && typeof existing.lng === "number"
+        ? { lat: existing.lat, lng: existing.lng }
+        : null;
+    const { insertIdx } = window.CarolOptimizer.findBestInsertionSlot(targetDayHouses, coords);
+    targetDayHouses.splice(insertIdx, 0, movedHouse);
+    const updatedTarget = window.CarolOptimizer.recomputeLegEstimates(targetDayHouses, "afternoon");
+    if (updatedTarget.length >= 2) {
+      await window.CarolOptimizer.refreshRouteLegsWithTraffic(updatedTarget, "afternoon");
+    }
+
+    const { data: d1 } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: oldDayId,
+      p_houses: oldDayHouses,
+      p_replace_day: true
+    });
+    const { data: d2 } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: newDayId,
+      p_houses: updatedTarget,
+      p_replace_day: true
+    });
+
+    if (d1 && d1.ok && d2 && d2.ok) {
+      const pinBar = document.getElementById("map-pin-bar");
+      if (pinBar) pinBar.classList.remove("visible");
+      refreshedDayRoadLegs.add(oldDayId);
+      refreshedDayRoadLegs.add(newDayId);
+      await syncActiveWardOnline(true);
+      broadcastPiiFreeEtaShift(oldDayId, 0, new Date().toISOString());
+      broadcastPiiFreeEtaShift(newDayId, 0, new Date().toISOString());
+      populateAdminControls();
+      const targetLabel = (getDays().find((d) => d.id === newDayId) || {}).label || "selected day";
+      showToast(`✅ Moved ${existing.family_name} to ${targetLabel} (Stop #${insertIdx + 1}) & synced for all!`);
+    } else {
+      showToast("Could not move house to the selected day.");
+    }
+  } catch (e) {
+    showToast("Save failed — check internet connection.");
+  } finally {
+    if (btn) {
+      btn.disabled = false;
+      btn.textContent = "💾 Save Day";
+    }
+  }
 }
 
 function rerenderRouteMapOnly() {
