@@ -4,22 +4,26 @@
  */
 
 :root {
-  --bg-base: #071A14;
-  --bg-surface: #0B251D;
-  --bg-surface-elevated: #0F172A;
-  --bg-hero: #142214;
-  --bg-input: #05130F;
-  --bg-map: #040E0B;
-  --border-subtle: #1D3B30;
-  --border-strong: #335C4C;
+  /* Sacred Bethlehem Midnight & Evergreen Christmas Palette (WCAG AA >= 4.5:1) */
+  --bg-base: #051319;
+  --bg-sky-top: #040B16;
+  --bg-sky-mid: #081C26;
+  --bg-sky-horizon: #071C16;
+  --bg-surface: rgba(9, 31, 27, 0.86);
+  --bg-surface-elevated: rgba(14, 34, 48, 0.9);
+  --bg-hero: rgba(15, 34, 24, 0.92);
+  --bg-input: rgba(4, 15, 16, 0.92);
+  --bg-map: #051218;
+  --border-subtle: rgba(245, 197, 66, 0.2);
+  --border-strong: rgba(245, 197, 66, 0.42);
 
-  --text-primary: #F8FAFC;
-  --text-secondary: #CBD5E1;
-  --text-muted: #94A3B8;
+  --text-primary: #FEFBF3;
+  --text-secondary: #D4E2EA;
+  --text-muted: #93ACC0;
 
-  --accent-gold: #F59E0B;
+  --accent-gold: #F5C542;
   --accent-gold-soft: #FDE68A;
-  --accent-gold-bg: rgba(245, 158, 11, 0.16);
+  --accent-gold-bg: rgba(245, 197, 66, 0.16);
   --accent-mint: #34D399;
   --accent-mint-dark: #065F46;
   --accent-mint-bg: rgba(52, 211, 153, 0.16);
@@ -37,24 +41,27 @@
   --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
 }
 
-/* Daytime Light / Snow Theme (for Admin Planning) */
+/* Daytime Light / Bethlehem Snow Theme */
 html.light-theme {
-  --bg-base: #F1F5F9;
-  --bg-surface: #FFFFFF;
-  --bg-surface-elevated: #E2E8F0;
-  --bg-hero: #FFFBEB;
+  --bg-base: #EDF3F8;
+  --bg-sky-top: #E6F0FA;
+  --bg-sky-mid: #F4F7FA;
+  --bg-sky-horizon: #FDF9EF;
+  --bg-surface: rgba(255, 255, 255, 0.92);
+  --bg-surface-elevated: rgba(241, 245, 249, 0.94);
+  --bg-hero: rgba(255, 251, 235, 0.95);
   --bg-input: #FFFFFF;
-  --bg-map: #F8FAFC;
-  --border-subtle: #CBD5E1;
-  --border-strong: #94A3B8;
+  --bg-map: #F6F9FC;
+  --border-subtle: rgba(15, 35, 29, 0.13);
+  --border-strong: rgba(180, 83, 9, 0.34);
 
-  --text-primary: #0F172A;
-  --text-secondary: #334155;
-  --text-muted: #64748B;
+  --text-primary: #0F231D;
+  --text-secondary: #334E45;
+  --text-muted: #5C736B;
 
   --accent-gold: #B45309;
   --accent-gold-soft: #92400E;
-  --accent-gold-bg: rgba(245, 158, 11, 0.15);
+  --accent-gold-bg: rgba(217, 119, 6, 0.14);
   --accent-mint: #047857;
   --accent-mint-dark: #065F46;
   --accent-mint-bg: rgba(16, 185, 129, 0.14);
@@ -85,7 +92,9 @@ html.large-print {
 
 body {
   font-family: var(--font-sans);
+  background: linear-gradient(180deg, var(--bg-sky-top) 0%, var(--bg-sky-mid) 52%, var(--bg-sky-horizon) 100%);
   background-color: var(--bg-base);
+  background-attachment: fixed;
   color: var(--text-primary);
   line-height: 1.4;
   padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
@@ -94,14 +103,77 @@ body {
   overflow-x: clip;
 }
 
+/* Zero-Space Fixed Nativity & Christmas Tree Ambient Backdrop */
+.nativity-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+.nativity-sky-svg {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 50vh;
+  min-height: 280px;
+  opacity: 0.85;
+}
+.nativity-horizon-svg {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  height: 215px;
+  opacity: 0.54;
+}
+.nb-hill-back { fill: #0C2A22; }
+.nb-hill-front { fill: #071D17; }
+.nb-tree { fill: #0D3D2F; }
+.nb-tree-dim { fill: #092B21; opacity: 0.8; }
+.nb-stable { fill: #2E1D12; }
+.nb-stable-stroke { stroke: #2E1D12; }
+.nb-figure { fill: #14222D; }
+
+html.light-theme .nativity-sky-svg { opacity: 0.16; }
+html.light-theme .nativity-horizon-svg { opacity: 0.13; }
+html.light-theme .nb-hill-back { fill: #94A3B8; }
+html.light-theme .nb-hill-front { fill: #64748B; }
+html.light-theme .nb-tree,
+html.light-theme .nb-tree-dim { fill: #0F4C3A; }
+html.light-theme .nb-stable { fill: #475569; }
+html.light-theme .nb-stable-stroke { stroke: #475569; }
+html.light-theme .nb-figure { fill: #1E293B; }
+
+@keyframes nbStarBreathe {
+  0%, 100% { opacity: 0.68; transform: scale(0.97); }
+  50% { opacity: 1; transform: scale(1.04); }
+}
+.nb-star-breathe {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: nbStarBreathe 6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .nb-star-breathe { animation: none; }
+}
+
 /* Sticky Header — 8px mobile, 14px desktop */
 .sticky-header {
   position: sticky;
   top: 0;
   z-index: 50;
-  background: var(--bg-base);
-  border-bottom: 2px solid var(--border-subtle);
+  background: rgba(5, 16, 24, 0.88);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border-bottom: 1.5px solid var(--border-subtle);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.28);
   padding: calc(8px + env(safe-area-inset-top, 0px)) 8px 8px;
+}
+html.light-theme .sticky-header {
+  background: rgba(255, 255, 255, 0.88);
+  box-shadow: 0 2px 14px rgba(15, 35, 29, 0.08);
 }
 @media (min-width: 768px) {
   .sticky-header {
@@ -118,6 +190,7 @@ body {
 }
 
 .container {
+  position: relative;
   padding: 10px 8px;
 }
 @media (min-width: 768px) {
@@ -146,12 +219,36 @@ body {
   width: 34px;
   height: 34px;
   border-radius: 10px;
-  background: #064E3B;
-  border: 2px solid var(--accent-gold);
+  background: radial-gradient(circle at 45% 24%, rgba(245, 197, 66, 0.28), rgba(6, 78, 59, 0.92));
+  border: 1.5px solid var(--accent-gold);
+  box-shadow: 0 0 12px rgba(245, 197, 66, 0.22);
   display: grid;
   place-items: center;
   font-size: 1.05rem;
   flex-shrink: 0;
+}
+.lock-nativity-crest {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 6px;
+}
+.hero-card {
+  position: relative;
+  overflow: hidden;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+}
+.hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2.5px;
+  background: linear-gradient(90deg, rgba(16, 185, 129, 0.7), rgba(245, 197, 66, 0.95), rgba(185, 28, 28, 0.75));
+}
+.stop-card,
+.lock-screen {
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
 }
 
 .brand-title {
@@ -1674,7 +1771,7 @@ textarea {
 /* Print Backup Sheet Styles */
 @media print {
   body { background: #fff !important; color: #000 !important; padding: 0 !important; }
-  .sticky-header, .live-controls, .search-bar-wrap, .snapshot-bar, .ward-footer,
+  .nativity-backdrop, .sticky-header, .live-controls, .search-bar-wrap, .snapshot-bar, .ward-footer,
   .bottom-install-bar, .hero-actions, .card-actions, .reorder-controls, .modal-backdrop { display: none !important; }
   .stop-card, .hero-card { border: 1px solid #999 !important; background: #fff !important; color: #000 !important; page-break-inside: avoid; margin-bottom: 8px !important; }
   .family-name, .address-line, .time-window, .seq-badge { color: #000 !important; }

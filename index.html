@@ -21,17 +21,137 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=42" />
+  <link rel="stylesheet" href="./styles.css?v=43" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
+
+  <!-- Zero-Space Fixed Christmas Tree & Nativity Ambient Backdrop -->
+  <div class="nativity-backdrop" aria-hidden="true">
+    <svg class="nativity-sky-svg" viewBox="0 0 1200 420" preserveAspectRatio="xMidYMin slice">
+      <defs>
+        <radialGradient id="nbStarGlow" cx="50%" cy="50%" r="50%">
+          <stop offset="0%" stop-color="#FFFBEB" stop-opacity="0.78" />
+          <stop offset="28%" stop-color="#F5C542" stop-opacity="0.28" />
+          <stop offset="65%" stop-color="#F5C542" stop-opacity="0.06" />
+          <stop offset="100%" stop-color="#F5C542" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <!-- Subtle Fine Starlight Field -->
+      <g fill="#FEF9EC" opacity="0.52">
+        <circle cx="95" cy="112" r="1.3" />
+        <circle cx="215" cy="88" r="1.5" />
+        <circle cx="340" cy="138" r="1.2" />
+        <circle cx="485" cy="96" r="1.4" />
+        <circle cx="695" cy="108" r="1.2" />
+        <circle cx="825" cy="92" r="1.5" />
+        <circle cx="1110" cy="134" r="1.4" />
+        <circle cx="155" cy="196" r="1.1" />
+        <circle cx="425" cy="182" r="1.0" />
+        <circle cx="810" cy="188" r="1.1" />
+        <circle cx="1065" cy="214" r="1.1" />
+      </g>
+      <!-- Radiant 8-Point Star of Bethlehem (Cleanly Below Sticky Header, Soft Radial Halo) -->
+      <g class="nb-star-breathe" transform="translate(995,134)">
+        <circle cx="0" cy="0" r="84" fill="url(#nbStarGlow)" />
+        <path d="M0,-28 L2.8,-2.8 L24,0 L2.8,2.8 L0,34 L-2.8,2.8 L-24,0 L-2.8,-2.8 Z" fill="#FDE68A" opacity="0.92" />
+        <path d="M0,-14 L1.8,-1.8 L14,0 L1.8,1.8 L0,14 L-1.8,1.8 L-14,0 L-1.8,-1.8 Z" fill="#FFFBEB" transform="rotate(45)" opacity="0.78" />
+      </g>
+    </svg>
+
+    <svg class="nativity-horizon-svg" viewBox="0 0 1200 180" preserveAspectRatio="xMidYMax slice">
+      <defs>
+        <radialGradient id="nbMangerGlow" cx="50%" cy="62%" r="55%">
+          <stop offset="0%" stop-color="#FDE68A" stop-opacity="0.75" />
+          <stop offset="55%" stop-color="#F59E0B" stop-opacity="0.22" />
+          <stop offset="100%" stop-color="#F59E0B" stop-opacity="0" />
+        </radialGradient>
+      </defs>
+      <!-- Serene Bethlehem Hills -->
+      <path class="nb-hill-back" d="M0,136 Q240,94 490,122 T960,118 T1200,132 L1200,180 L0,180 Z" />
+      <path class="nb-hill-front" d="M0,154 Q300,132 600,148 T1200,144 L1200,180 L0,180 Z" />
+
+      <!-- Left Architectural Pine Christmas Trees -->
+      <g class="nb-tree" transform="translate(155, 58)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,86 36,86" />
+        <polygon points="0,68 -44,112 44,112" />
+        <path d="M0,-10 L1.8,-3 L8,-3 L3,0.8 L4.6,7 L0,3.4 L-4.6,7 L-3,0.8 L-8,-3 L-1.8,-3 Z" fill="#F5C542" opacity="0.85" />
+      </g>
+      <g class="nb-tree-dim" transform="translate(88, 92) scale(0.72)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,88 36,88" />
+      </g>
+      <g class="nb-tree-dim" transform="translate(226, 98) scale(0.64)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,88 36,88" />
+      </g>
+
+      <!-- Center Dignified Nativity Stable & Holy Family Silhouette -->
+      <g transform="translate(600, 74)">
+        <ellipse cx="0" cy="64" rx="74" ry="34" fill="url(#nbMangerGlow)" />
+        <!-- Stable Timber Frame -->
+        <path class="nb-stable" d="M0,0 L-82,34 L-75,40 L0,10 L75,40 L82,34 Z" />
+        <rect class="nb-stable" x="-64" y="34" width="7" height="62" />
+        <rect class="nb-stable" x="57" y="34" width="7" height="62" />
+        <!-- Joseph -->
+        <g class="nb-figure" transform="translate(-30, 38)">
+          <circle cx="0" cy="6" r="5.8" />
+          <path d="M-9,52 L-5,15 Q0,12 5,15 L10,52 Z" />
+          <line x1="-12" y1="8" x2="-12" y2="52" stroke="#D9A441" stroke-width="1.6" stroke-linecap="round" opacity="0.7" />
+        </g>
+        <!-- Mary -->
+        <g class="nb-figure" transform="translate(28, 46)">
+          <circle cx="0" cy="5.5" r="5.2" />
+          <path d="M-11,44 Q-6,15 0,13 Q7,15 11,44 Z" />
+        </g>
+        <!-- Manger & Baby Jesus Halo -->
+        <g transform="translate(0, 68)">
+          <circle cx="0" cy="2" r="11" fill="none" stroke="#FDE68A" stroke-width="1.2" opacity="0.82" />
+          <circle cx="0" cy="2" r="4" fill="#FFFBEB" />
+          <path class="nb-stable" d="M-14,7 L14,7 L10,17 L-10,17 Z" />
+          <line class="nb-stable-stroke" x1="-9" y1="17" x2="-13" y2="23" stroke-width="2.2" />
+          <line class="nb-stable-stroke" x1="9" y1="17" x2="13" y2="23" stroke-width="2.2" />
+        </g>
+      </g>
+
+      <!-- Right Architectural Pine Christmas Trees -->
+      <g class="nb-tree" transform="translate(1045, 58)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,86 36,86" />
+        <polygon points="0,68 -44,112 44,112" />
+        <path d="M0,-10 L1.8,-3 L8,-3 L3,0.8 L4.6,7 L0,3.4 L-4.6,7 L-3,0.8 L-8,-3 L-1.8,-3 Z" fill="#F5C542" opacity="0.85" />
+      </g>
+      <g class="nb-tree-dim" transform="translate(974, 96) scale(0.66)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,88 36,88" />
+      </g>
+      <g class="nb-tree-dim" transform="translate(1115, 92) scale(0.72)">
+        <polygon points="0,0 -20,30 20,30" />
+        <polygon points="0,20 -28,56 28,56" />
+        <polygon points="0,42 -36,88 36,88" />
+      </g>
+    </svg>
+  </div>
 
   <!-- Sticky Header -->
   <header class="sticky-header">
     <div class="header-inner">
       <div class="header-top">
         <div class="brand">
-          <div class="brand-icon" aria-hidden="true">🎄</div>
+          <div class="brand-icon" aria-hidden="true">
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="none">
+              <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#FDE68A" />
+              <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
+              <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
+              <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
+            </svg>
+          </div>
           <div class="brand-title">
             <h1 id="header-ward-title">Ward 4 – Blessed Kunjachan</h1>
             <p id="header-subtitle">St. Mary's Syro Malabar Catholic Church</p>
@@ -90,7 +210,38 @@
   <main class="container">
     <!-- Christmas Lock Screen (Zero PII shown until verified via Supabase RPC) -->
     <section id="lock-screen-view" class="lock-screen" style="display: none;">
-      <div class="lock-icon">🌟</div>
+      <div class="lock-nativity-crest" aria-hidden="true">
+        <svg viewBox="0 0 180 76" width="176" height="74">
+          <defs>
+            <radialGradient id="lcGlow" cx="50%" cy="38%" r="52%">
+              <stop offset="0%" stop-color="#FDE68A" stop-opacity="0.42" />
+              <stop offset="100%" stop-color="#F5C542" stop-opacity="0" />
+            </radialGradient>
+          </defs>
+          <ellipse cx="90" cy="40" rx="74" ry="32" fill="url(#lcGlow)" />
+          <!-- Star of Bethlehem -->
+          <path d="M90,4 L92.1,13.2 L101,15.5 L92.1,17.8 L90,27 L87.9,17.8 L79,15.5 L87.9,13.2 Z" fill="#FDE68A" />
+          <!-- Flanking Minimal Pine Trees -->
+          <g fill="#0E5A43" opacity="0.88">
+            <polygon points="28,34 18,52 38,52" />
+            <polygon points="28,44 15,65 41,65" />
+            <polygon points="152,34 142,52 162,52" />
+            <polygon points="152,44 139,65 165,65" />
+          </g>
+          <!-- Nativity Stable Arch & Holy Family -->
+          <path d="M90,28 L52,44 L55,47 L90,33 L125,47 L128,44 Z" fill="#D9A441" opacity="0.92" />
+          <line x1="60" y1="45" x2="60" y2="66" stroke="#D9A441" stroke-width="2" opacity="0.7" />
+          <line x1="120" y1="45" x2="120" y2="66" stroke="#D9A441" stroke-width="2" opacity="0.7" />
+          <circle cx="76" cy="48" r="3.2" fill="#FDE68A" opacity="0.9" />
+          <path d="M71,66 L73,53 Q76,51 79,53 L81,66 Z" fill="#FDE68A" opacity="0.78" />
+          <circle cx="104" cy="51" r="2.9" fill="#FDE68A" opacity="0.9" />
+          <path d="M98,66 Q101,55 104,54 Q107,55 110,66 Z" fill="#FDE68A" opacity="0.78" />
+          <circle cx="90" cy="57" r="5.2" fill="none" stroke="#FFFBEB" stroke-width="1" opacity="0.85" />
+          <circle cx="90" cy="57" r="2.1" fill="#FFFBEB" />
+          <path d="M84,60 L96,60 L94,65 L86,65 Z" fill="#D9A441" />
+          <line x1="20" y1="67" x2="160" y2="67" stroke="#F5C542" stroke-width="1" opacity="0.4" />
+        </svg>
+      </div>
       <div class="lock-ward-badge" id="lock-ward-badge">Ward 4 – Blessed Kunjachan</div>
       <h2>Enter Ward Access Code</h2>
       <p id="lock-subtitle">Family names, addresses, and live carol ETAs are protected for St. Mary's parishioners.</p>
@@ -743,9 +894,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=42" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=42" charset="UTF-8"></script>
-  <script src="./songbook.js?v=42" charset="UTF-8"></script>
-  <script src="./app.js?v=42" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=43" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=43" charset="UTF-8"></script>
+  <script src="./songbook.js?v=43" charset="UTF-8"></script>
+  <script src="./app.js?v=43" charset="UTF-8"></script>
 </body>
 </html>
