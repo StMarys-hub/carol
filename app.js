@@ -1086,8 +1086,30 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     };
   };
 
-  // 1. Render OTHER (inactive) carol days underneath — clearly visible muted style (theme-aware)
+  // 1. Subtle Cartographic Background Grid & Compass Rose
   const isLight = !!prefs.lightTheme;
+  const gridStroke = isLight ? "rgba(15,23,42,0.06)" : "rgba(148,163,184,0.08)";
+  let gridSvg = "";
+  for (let gx = 1; gx <= 4; gx++) {
+    const x = (W / 5) * gx;
+    gridSvg += `<line x1="${x.toFixed(1)}" y1="0" x2="${x.toFixed(1)}" y2="${H}" stroke="${gridStroke}" stroke-width="1" stroke-dasharray="3 4" />`;
+  }
+  for (let gy = 1; gy <= 3; gy++) {
+    const y = (H / 4) * gy;
+    gridSvg += `<line x1="0" y1="${y.toFixed(1)}" x2="${W}" y2="${y.toFixed(1)}" stroke="${gridStroke}" stroke-width="1" stroke-dasharray="3 4" />`;
+  }
+  const compassCol = isLight ? "rgba(15,23,42,0.45)" : "rgba(226,232,240,0.45)";
+  const compassBg = isLight ? "rgba(255,255,255,0.75)" : "rgba(6,24,18,0.68)";
+  const compassSvg = `
+    <g transform="translate(18, ${(H - 18).toFixed(1)})" style="pointer-events:none;">
+      <circle cx="0" cy="0" r="11" fill="${compassBg}" stroke="${gridStroke}" stroke-width="1" />
+      <polygon points="0,-7 2.8,0 -2.8,0" fill="#F59E0B" opacity="0.85" />
+      <polygon points="0,7 2.8,0 -2.8,0" fill="${compassCol}" opacity="0.5" />
+      <text x="0" y="-12.5" text-anchor="middle" fill="${compassCol}" font-size="7" font-weight="900" font-family="sans-serif">N</text>
+    </g>
+  `;
+
+  // 2. Render OTHER (inactive) carol days underneath — clearly visible muted style (theme-aware)
   let otherDaysSvg = "";
   const otherColors = isLight ? ["#64748B", "#475569", "#78716C"] : ["#94A3B8", "#7DD3FC", "#A78BFA"];
   const otherFill = isLight ? "#E2E8F0" : "#1E293B";
@@ -1202,10 +1224,20 @@ function renderOfflineRouteSvg(computed, nextIndex) {
       : isLongLeg
       ? (isLight ? "#D97706" : "#FBBF24")
       : (isLight ? "#0284C7" : "#38BDF8");
-    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="${isLongLeg ? "2.9" : "2.6"}" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="6.5" stroke-linecap="round" opacity="0.14" />`;
+    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="${isLongLeg ? "2.9" : "2.6"}" stroke-linecap="round" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+
+    // Subtle directional chevron showing route flow (1 -> 2 -> 3) on segments >= 36px
+    const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (segLen >= 36) {
+      const tPos = mapShowMiles && segLen >= 42 ? 0.72 : 0.56;
+      const ax = p1.x + (p2.x - p1.x) * tPos;
+      const ay = p1.y + (p2.y - p1.y) * tPos;
+      const ang = (Math.atan2(p2.y - p1.y, p2.x - p1.x) * 180) / Math.PI;
+      activeLinesSvg += `<polygon points="4.2,0 -2.6,-2.9 -1.2,0 -2.6,2.9" fill="${stroke}" opacity="0.92" transform="translate(${ax.toFixed(1)},${ay.toFixed(1)}) rotate(${ang.toFixed(1)})" />`;
+    }
 
     // Smart collision-safe per-leg distance pill on segments long enough (>= 42px)
-    const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
     if (mapShowMiles && segLen >= 42 && (isWalk || typeof legMiles === "number")) {
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
@@ -1352,7 +1384,8 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     `;
   }
 
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${legBadgesSvg}${activePinsSvg}${labelsSvg}${userDotSvg}</svg>`;
+  const svgDefs = `<defs><filter id="pinShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="1.4" stdDeviation="1.6" flood-color="#000000" flood-opacity="0.38" /></filter></defs>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${svgDefs}${gridSvg}${otherDaysSvg}${activeLinesSvg}${legBadgesSvg}<g filter="url(#pinShadow)">${activePinsSvg}</g>${labelsSvg}${userDotSvg}${compassSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
@@ -2024,15 +2057,38 @@ function findDuplicateHouse(familyName, address, excludeHouseId = null, excluded
   return null;
 }
 
-// ---------- Add Unplanned New House (Shortest Detour + Optional Supabase Sync) ----------
+// ---------- Add Unplanned New House (Full Day Route Optimization + Optional Supabase Sync) ----------
 
-function openAddHouseModal() {
+let addHouseOpenedFromMap = false;
+
+function openAddHouseModal(fromMap = false) {
+  addHouseOpenedFromMap = !!fromMap;
   document.getElementById("add-family").value = "";
   document.getElementById("add-address").value = "";
   document.getElementById("add-phone").value = "";
   document.getElementById("add-notes").value = "";
   document.getElementById("add-placement").value = "auto";
-  document.getElementById("add-house-status").textContent = "Smart mode finds the shortest detour among remaining unvisited houses.";
+
+  const daySel = document.getElementById("add-day-select");
+  if (daySel) {
+    const days = getDays();
+    daySel.innerHTML = days
+      .map((d) => `<option value="${d.id}" ${d.id === activeDayId ? "selected" : ""}>${escapeHtml(d.label)}</option>`)
+      .join("");
+  }
+
+  const syncBanner = document.getElementById("add-house-sync-banner");
+  const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
+  if (syncBanner) {
+    syncBanner.classList.toggle("admin-live", isAdmin);
+    syncBanner.textContent = isAdmin
+      ? "🔐 Admin mode — saves to cloud & updates all phones immediately."
+      : "📱 Local preview only — unlock 🔐 Admin to save for everyone.";
+  }
+
+  const statusEl = document.getElementById("add-house-status");
+  statusEl.style.color = "var(--accent-sky)";
+  statusEl.textContent = "Optimize mode re-sorts remaining stops so the new house fits the shortest overall route.";
   document.getElementById("add-house-modal").classList.add("open");
 }
 
@@ -2041,6 +2097,7 @@ async function submitNewHouse() {
   const address = document.getElementById("add-address").value.trim();
   const phone = document.getElementById("add-phone").value.trim();
   const notes = document.getElementById("add-notes").value.trim();
+  const targetDayId = document.getElementById("add-day-select")?.value || activeDayId;
   const placement = document.getElementById("add-placement").value;
   const visit_mins = Math.max(5, parseInt(document.getElementById("add-visit-mins").value, 10) || 20);
   const statusEl = document.getElementById("add-house-status");
@@ -2060,49 +2117,29 @@ async function submitNewHouse() {
   statusEl.style.color = "var(--accent-sky)";
 
   btn.disabled = true;
-  btn.textContent = "Calculating...";
-  statusEl.textContent = "Geocoding address & finding shortest detour...";
+  btn.textContent = "Optimizing...";
+  statusEl.textContent = "Geocoding address & optimizing route for the day...";
 
-  const dayHouses = getDayHouses(activeDayId);
   const coords = await window.CarolOptimizer.geocodeAddress(address);
-
-  let insertIdx = dayHouses.length;
-  let detourInfo = "";
-  const firstUnvisited = dayHouses.findIndex((h) => !h.visited);
-  const hasEnd = dayHouses.length > 0 && dayHouses[dayHouses.length - 1].stop_role === "END";
-  const maxSlot = hasEnd ? dayHouses.length - 1 : dayHouses.length;
-
-  if (placement === "next") {
-    insertIdx = firstUnvisited === -1 ? maxSlot : firstUnvisited;
-  } else if (placement === "before-end") {
-    insertIdx = maxSlot;
-  } else {
-    const res = window.CarolOptimizer.findBestInsertionSlot(dayHouses, coords);
-    insertIdx = res.insertIdx;
-    if (coords) detourInfo = ` (~+${Math.max(0.1, res.addedMiles * 1.25).toFixed(1)} mi detour)`;
+  if (!coords) {
+    const proceed = window.confirm(
+      `Could not pinpoint "${address}" on the map.\n\nPress OK to save without a map pin, or Cancel to fix the street address.`
+    );
+    if (!proceed) {
+      btn.disabled = false;
+      btn.textContent = "Find Best Spot & Add";
+      statusEl.style.color = "var(--accent-gold)";
+      statusEl.textContent = "Check street spelling, city & ZIP, then try again.";
+      return;
+    }
   }
 
-  let drive_mins = insertIdx === 0 ? 0 : 6;
-  let distance_label = insertIdx === 0 ? "Start" : "Est. 6 min drive";
-  const prev = insertIdx > 0 ? dayHouses[insertIdx - 1] : null;
-  const next = insertIdx < dayHouses.length ? dayHouses[insertIdx] : null;
-
-  if (coords && prev && typeof prev.lat === "number") {
-    const legIn = await window.CarolOptimizer.fetchOsrmLeg({ lat: prev.lat, lng: prev.lng }, coords);
-    drive_mins = legIn.drive_mins;
-    distance_label = legIn.distance_label;
-  }
-  if (coords && next && typeof next.lat === "number") {
-    const legOut = await window.CarolOptimizer.fetchOsrmLeg(coords, { lat: next.lat, lng: next.lng });
-    next.drive_mins = legOut.drive_mins;
-    next.distance_label = legOut.distance_label;
-  }
-
+  let dayHouses = getDayHouses(targetDayId).map((h) => ({ ...h }));
   const newHouse = {
     id: `local-${Date.now()}`,
     ward_id: activeWardId,
     season_id: wardPayload.active_season ? wardPayload.active_season.id : null,
-    carol_day_id: activeDayId,
+    carol_day_id: targetDayId,
     family_name,
     address,
     lat: coords ? coords.lat : null,
@@ -2110,42 +2147,84 @@ async function submitNewHouse() {
     phone,
     notes: notes ? `✨ Added live • ${notes}` : "✨ Unplanned house added during carol",
     stop_role: null,
-    stop_order: insertIdx,
-    drive_mins,
-    distance_label,
+    stop_order: dayHouses.length,
+    drive_mins: 5,
+    distance_label: "Est. 5 min drive",
     visit_mins,
     visited: false,
     checked_in_at: null
   };
 
-  dayHouses.splice(insertIdx, 0, newHouse);
+  const firstUnvisited = dayHouses.findIndex((h) => !h.visited);
+  const hasEnd = dayHouses.length > 0 && dayHouses[dayHouses.length - 1].stop_role === "END";
+  const maxSlot = hasEnd ? dayHouses.length - 1 : dayHouses.length;
+
+  if (placement === "next") {
+    const insertIdx = firstUnvisited === -1 ? maxSlot : firstUnvisited;
+    dayHouses.splice(insertIdx, 0, newHouse);
+  } else if (placement === "before-end") {
+    dayHouses.splice(maxSlot, 0, newHouse);
+  } else {
+    // Full Day Route Optimization: keep already-visited stops locked at the front, optimize remaining stops + new house
+    const visitedPrefix = firstUnvisited > 0 ? dayHouses.slice(0, firstUnvisited) : [];
+    const unvisitedSuffix = firstUnvisited === -1 ? [] : dayHouses.slice(firstUnvisited);
+    const optimizedSuffix = window.CarolOptimizer.optimizeDayHouses([...unvisitedSuffix, newHouse]);
+    dayHouses = [...visitedPrefix, ...optimizedSuffix];
+  }
+
+  dayHouses = window.CarolOptimizer.recomputeLegEstimates(dayHouses, "afternoon");
+  if (dayHouses.length >= 2) {
+    await window.CarolOptimizer.refreshRouteLegsWithTraffic(dayHouses, "afternoon");
+  }
   dayHouses.forEach((h, i) => (h.stop_order = i));
+  const finalIdx = dayHouses.findIndex((h) => h.id === newHouse.id);
 
   // Merge back into wardPayload
   wardPayload.ward_houses = wardPayload.ward_houses
-    .filter((h) => h.carol_day_id !== activeDayId)
+    .filter((h) => h.carol_day_id !== targetDayId)
     .concat(dayHouses);
   localStorage.setItem(keyOfflineRoute(activeWardId), JSON.stringify(wardPayload));
 
   // Sync to Supabase if Admin is unlocked
+  let syncedToCloud = false;
   if (adminSession.unlocked && adminSession.wardId === activeWardId && sbClient && wardPayload.active_season) {
-    await sbClient.rpc("admin_bulk_save_houses", {
+    const { data } = await sbClient.rpc("admin_bulk_save_houses", {
       p_ward_id: activeWardId,
       p_admin_code: adminSession.code,
       p_season_id: wardPayload.active_season.id,
-      p_carol_day_id: activeDayId,
+      p_carol_day_id: targetDayId,
       p_houses: dayHouses,
       p_replace_day: true
     });
-    broadcastPiiFreeEtaShift(activeDayId, insertIdx, new Date().toISOString());
-    await syncActiveWardOnline(true);
+    if (data && data.ok) {
+      syncedToCloud = true;
+      refreshedDayRoadLegs.add(targetDayId);
+      broadcastPiiFreeEtaShift(targetDayId, Math.max(0, finalIdx), new Date().toISOString());
+      await syncActiveWardOnline(true);
+    }
   }
 
+  activeDayId = targetDayId;
   btn.disabled = false;
   btn.textContent = "Find Best Spot & Add";
   closeModal("add-house-modal");
   render();
-  showToast(`Added ${family_name} at Stop #${insertIdx + 1}${detourInfo}`);
+  populateAdminControls();
+
+  // If added from Map view, highlight the new house pin on the map immediately
+  if (addHouseOpenedFromMap || snapshotOpen || mapFullscreen) {
+    const freshDayHouses = getDayHouses(targetDayId);
+    const saved = freshDayHouses.find(
+      (h) => normalizeDupKey(h.family_name) === normalizeDupKey(family_name)
+    );
+    if (saved) selectMapPin(saved.id);
+  }
+
+  const targetLabel = (getDays().find((d) => d.id === targetDayId) || {}).label || "selected day";
+  showToast(
+    `✅ Added ${family_name} to ${targetLabel} at Stop #${finalIdx + 1}` +
+      (syncedToCloud ? " (optimized & synced!)" : " (optimized locally)")
+  );
 }
 
 // ---------- Songbook Integration ----------

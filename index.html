@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=35" />
+  <link rel="stylesheet" href="./styles.css?v=36" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -136,6 +136,8 @@
               <div id="map-stats-hud" class="map-stats-hud" aria-live="polite"></div>
               <div class="map-zoom-controls" aria-label="Map controls">
                 <button id="btn-map-fullscreen" class="map-zoom-btn" onclick="toggleMapFullscreen()" title="Full Screen Map" aria-label="Full Screen Map">⛶</button>
+                <button id="btn-map-add-house" class="map-zoom-btn add-btn" onclick="openAddHouseModal(true)" title="Add House to Map" aria-label="Add House to Map">＋🏠</button>
+                <span class="map-zoom-divider" aria-hidden="true"></span>
                 <button class="map-zoom-btn" onclick="zoomRouteMap(0.45)" title="Zoom In" aria-label="Zoom In">＋</button>
                 <button class="map-zoom-btn" onclick="zoomRouteMap(-0.45)" title="Zoom Out" aria-label="Zoom Out">－</button>
                 <button id="btn-map-miles" class="map-zoom-btn active" onclick="toggleMapMiles()" title="Toggle Leg Miles" aria-label="Toggle Leg Miles" style="font-size:0.7rem;">mi</button>
@@ -148,8 +150,12 @@
             </div>
             <div id="map-pin-bar" class="map-pin-bar"></div>
             <div class="route-svg-legend">
-              <span>Tap pin for info • Dim = other days • Drag when zoomed</span>
-              <span>🟢 Done • 🟡 Current • 🔴 Final</span>
+              <span class="legend-chip"><span class="legend-dot done"></span>Done</span>
+              <span class="legend-chip"><span class="legend-dot cur"></span>Next</span>
+              <span class="legend-chip"><span class="legend-dot final"></span>Final</span>
+              <span class="legend-chip"><span class="legend-dot long"></span>≥3 mi leg</span>
+              <span class="legend-chip"><span class="legend-dot other"></span>Other days</span>
+              <span class="legend-hint">Tap pin to navigate or reassign</span>
             </div>
           </div>
           <div id="snapshot-map-links" class="snapshot-map-links"></div>
@@ -283,9 +289,10 @@
   <div id="add-house-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'add-house-modal')">
     <div class="modal-sheet" role="dialog" aria-modal="true">
       <div class="modal-header">
-        <h2>➕ Add Unplanned House</h2>
+        <h2>➕ Add House &amp; Optimize Route</h2>
         <button class="close-btn" onclick="closeModal('add-house-modal')">✕ Close</button>
       </div>
+      <div id="add-house-sync-banner" class="add-house-sync-banner"></div>
       <div class="form-group">
         <label for="add-family">Family Name *</label>
         <input type="text" id="add-family" placeholder="e.g., Mathew &amp; Mini" />
@@ -296,27 +303,31 @@
       </div>
       <div class="form-row">
         <div class="form-group">
-          <label for="add-placement">Best Path / Placement</label>
-          <select id="add-placement">
-            <option value="auto">🎯 Smart Best Route (Shortest Detour)</option>
-            <option value="next">⚡ Next Stop (Right Now)</option>
-            <option value="before-end">🍽️ Just Before Final Stop</option>
-          </select>
+          <label for="add-day-select">📅 Assign to Carol Day</label>
+          <select id="add-day-select"></select>
         </div>
         <div class="form-group">
-          <label for="add-visit-mins">Caroling Time (Mins)</label>
-          <input type="number" id="add-visit-mins" min="5" max="120" value="20" />
+          <label for="add-placement">Route Placement</label>
+          <select id="add-placement">
+            <option value="auto">⚡ Optimize Full Day Route</option>
+            <option value="next">🎯 Next Stop (Right Now)</option>
+            <option value="before-end">🍽️ Just Before Final Stop</option>
+          </select>
         </div>
       </div>
       <div class="form-row">
         <div class="form-group">
+          <label for="add-visit-mins">Caroling Time (Mins)</label>
+          <input type="number" id="add-visit-mins" min="5" max="120" value="20" />
+        </div>
+        <div class="form-group">
           <label for="add-phone">Host Phone (Optional)</label>
           <input type="tel" id="add-phone" placeholder="704-555-0199" />
         </div>
-        <div class="form-group">
-          <label for="add-notes">Notes / Gate Code</label>
-          <input type="text" id="add-notes" placeholder="e.g., Added during carol" />
-        </div>
+      </div>
+      <div class="form-group">
+        <label for="add-notes">Notes / Gate Code</label>
+        <input type="text" id="add-notes" placeholder="e.g., Added during carol" />
       </div>
       <div id="add-house-status" class="helper-text" style="color: var(--accent-sky);"></div>
       <div class="modal-footer">
@@ -690,9 +701,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=35" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=35" charset="UTF-8"></script>
-  <script src="./songbook.js?v=35" charset="UTF-8"></script>
-  <script src="./app.js?v=35" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=36" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=36" charset="UTF-8"></script>
+  <script src="./songbook.js?v=36" charset="UTF-8"></script>
+  <script src="./app.js?v=36" charset="UTF-8"></script>
 </body>
 </html>
