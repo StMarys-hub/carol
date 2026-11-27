@@ -637,6 +637,8 @@ function switchDay(dayId) {
   const searchEl = document.getElementById("search-input");
   if (searchEl) searchEl.value = "";
   document.getElementById("search-clear").classList.remove("visible");
+  const pinBar = document.getElementById("map-pin-bar");
+  if (pinBar) pinBar.classList.remove("visible");
   render();
   ensureActiveDayRealRoadLegs();
 }
@@ -1383,7 +1385,22 @@ function render() {
   document.getElementById("metric-ratios").textContent = `${totalTravelMins}m (${totalMiles.toFixed(1)} mi)`;
   document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
 
-  // Snapshot Map + Chunked Multi-Stop Google Maps Legs
+  // Snapshot Map + In-Map Day Switcher + Chunked Multi-Stop Google Maps Legs
+  const mapDaySwitcher = document.getElementById("map-day-switcher");
+  if (mapDaySwitcher) {
+    if (days.length <= 1) {
+      mapDaySwitcher.classList.add("hidden");
+      mapDaySwitcher.innerHTML = "";
+    } else {
+      mapDaySwitcher.classList.remove("hidden");
+      mapDaySwitcher.innerHTML = days
+        .map((d) => {
+          const cnt = getDayHouses(d.id).length;
+          return `<button class="map-day-pill ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">🎄 ${escapeHtml(d.label)} (${cnt})</button>`;
+        })
+        .join("");
+    }
+  }
   document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
   document.getElementById("route-svg-container").innerHTML = renderOfflineRouteSvg(computed, currentStop ? currentStop.index : -1);
   initRouteMapPanHandlers();

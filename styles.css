@@ -481,6 +481,41 @@ body {
   border-radius: var(--radius-sm);
   padding: 6px;
 }
+.map-day-switcher {
+  display: flex;
+  gap: 6px;
+  overflow-x: auto;
+  padding-bottom: 6px;
+  margin-bottom: 4px;
+  scrollbar-width: none;
+}
+.map-day-switcher::-webkit-scrollbar {
+  display: none;
+}
+.map-day-switcher.hidden {
+  display: none;
+}
+.map-day-pill {
+  background: var(--bg-surface-elevated);
+  border: 1.5px solid var(--border-strong);
+  color: var(--text-secondary);
+  border-radius: 99px;
+  padding: 5px 11px;
+  font-size: 0.78rem;
+  font-weight: 800;
+  white-space: nowrap;
+  cursor: pointer;
+  font-family: inherit;
+  flex-shrink: 0;
+}
+.map-day-pill.active {
+  background: var(--accent-gold);
+  color: #000000;
+  border-color: var(--accent-gold);
+}
+.route-svg-stage {
+  position: relative;
+}
 .route-svg-viewport {
   overflow: hidden;
   border-radius: 6px;
@@ -492,8 +527,8 @@ body {
 }
 .map-zoom-controls {
   position: absolute;
-  top: 10px;
-  right: 10px;
+  top: 8px;
+  right: 8px;
   z-index: 4;
   display: flex;
   flex-direction: column;
@@ -525,8 +560,16 @@ body {
   flex-direction: column;
   justify-content: space-between;
 }
+.route-svg-wrap.fullscreen .route-svg-stage {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
 .route-svg-wrap.fullscreen .route-svg-viewport {
   flex: 1;
+  min-height: 0;
+  width: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
