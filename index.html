@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=39" />
+  <link rel="stylesheet" href="./styles.css?v=40" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -42,8 +42,8 @@
           <button id="btn-theme" class="icon-btn" onclick="toggleTheme()" title="Night / Snow Theme" aria-label="Toggle Theme">🌙</button>
           <button id="btn-large-print" class="icon-btn" onclick="toggleLargePrint()" title="Large Print" aria-label="Large Print">Aa+</button>
           <button class="icon-btn" onclick="openQuickHelpModal()" title="Quick Help" aria-label="Quick Help">?</button>
-          <button id="btn-admin-open" class="icon-btn" onclick="openAdminModal()" title="Ward Admin Portal" aria-label="Ward Admin">🔐</button>
-          <button class="icon-btn" onclick="openSettingsModal()" title="Settings" aria-label="Settings">⚙️</button>
+          <button id="btn-admin-open" class="icon-btn" onclick="toggleCoordinatorLock()" title="Unlock Coordinator Mode" aria-label="Toggle Coordinator Lock">🔒</button>
+          <button class="icon-btn" onclick="openSettingsModal()" title="Settings &amp; Configuration" aria-label="Settings and Configuration">⚙️</button>
         </div>
       </div>
 
@@ -203,7 +203,7 @@
           <button class="footer-chip" onclick="copyFullDaySchedule()">📋 Copy Schedule</button>
           <button class="footer-chip" onclick="window.print()">🖨️ Print Backup</button>
           <button class="footer-chip" onclick="openQuickHelpModal()">❓ Help</button>
-          <button class="footer-chip" onclick="openAdminModal()">🔐 Ward Admin</button>
+          <button class="footer-chip" onclick="openSettingsModal()">⚙️ Settings &amp; Admin</button>
           <button class="footer-chip" onclick="lockCurrentWard()">🔒 Lock Ward</button>
         </div>
       </footer>
@@ -347,31 +347,32 @@
         <button class="close-btn" onclick="closeModal('admin-modal')">✕ Close</button>
       </div>
 
-      <!-- Admin Login Gate -->
+      <!-- Coordinator Unlock PIN Gate -->
       <div id="admin-login-gate">
         <p class="helper-text" style="margin-bottom: 12px; font-size: 0.88rem;">
-          Enter the Admin Code for <strong id="admin-gate-ward-name">Ward 4</strong> to manage houses, days, years, or broadcast messages.
+          Enter the Coordinator PIN for <strong id="admin-gate-ward-name">Ward 4</strong> to unlock live route controls, map editing, and full ⚙️ Settings.
         </p>
         <div class="form-group">
-          <label for="admin-code-input">Ward Admin Code</label>
+          <label for="admin-code-input">Coordinator PIN</label>
           <div class="pw-wrap">
-            <input type="password" id="admin-code-input" placeholder="Enter Admin Code" onkeydown="if(event.key==='Enter') handleAdminVerify()" />
-            <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('admin-code-input', this)" title="Show / Hide Code" aria-label="Show or hide admin code">👁️</button>
+            <input type="password" id="admin-code-input" placeholder="Enter Coordinator PIN" onkeydown="if(event.key==='Enter') handleAdminVerify()" />
+            <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('admin-code-input', this)" title="Show / Hide PIN" aria-label="Show or hide coordinator PIN">👁️</button>
           </div>
         </div>
         <div id="admin-login-error" class="lock-error"></div>
         <div class="modal-footer">
           <button class="btn-full btn-secondary" onclick="closeModal('admin-modal')">Cancel</button>
-          <button class="btn-full btn-gold" onclick="handleAdminVerify()">🔓 Unlock Admin</button>
+          <button class="btn-full btn-gold" onclick="handleAdminVerify()">🔓 Unlock Coordinator</button>
         </div>
       </div>
 
-      <!-- Unlocked Simple 3-Tab Admin Portal -->
+      <!-- Unlocked Unified 4-Tab Settings & Admin Hub -->
       <div id="admin-portal-body" style="display: none;">
         <div class="admin-tabs">
           <button class="admin-tab active" onclick="switchAdminTab('houses', this)">🏠 Houses &amp; Route</button>
           <button class="admin-tab" onclick="switchAdminTab('seasons', this)">📅 Years &amp; Days</button>
-          <button class="admin-tab" onclick="switchAdminTab('security', this)">🔑 Code &amp; Broadcast</button>
+          <button class="admin-tab" onclick="switchAdminTab('security', this)">🔑 PINs &amp; Alerts</button>
+          <button class="admin-tab" onclick="switchAdminTab('app', this)">⚙️ App Prefs</button>
         </div>
 
         <!-- TAB 1: Houses, Auto-Sort Route & Simple Paste Importer -->
@@ -472,37 +473,70 @@
           </div>
         </div>
 
-        <!-- TAB 3: Ward Code, WhatsApp Invite & Broadcast -->
+        <!-- TAB 3: PINs & Alerts -->
         <div id="admin-pane-security" class="admin-pane">
           <div class="admin-card">
-            <div class="admin-card-title"><span>📢 Live Message Broadcast</span></div>
+            <div class="admin-card-title"><span>📢 Live Broadcast Alert</span></div>
             <p class="helper-text" style="margin-bottom: 10px;">Send an instant popup announcement to all connected carolers in this ward.</p>
             <button class="btn-full btn-gold" onclick="closeModal('admin-modal'); openBroadcastModal();">📢 Open Broadcast Popup</button>
           </div>
 
           <div class="admin-card">
-            <div class="admin-card-title"><span>🔑 Ward Access Code (For Families)</span></div>
+            <div class="admin-card-title"><span>📲 Ward Access PIN &amp; WhatsApp Invite</span></div>
             <div class="form-group">
               <div style="display: flex; gap: 8px;">
-                <input type="text" id="sec-new-user-code" placeholder="New 4-digit code (e.g., 4829)" style="flex: 1;" />
+                <input type="text" id="sec-new-user-code" placeholder="New 4-digit PIN (e.g., 4829)" style="flex: 1;" />
                 <button class="btn-full btn-secondary" onclick="generateRandomPin()" style="flex: 0 0 auto; min-width: 110px;">🎲 Random</button>
               </div>
             </div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
-              <button class="btn-full btn-gold" onclick="resetWardUserCode()">🔄 Save New Code</button>
+              <button class="btn-full btn-gold" onclick="resetWardUserCode()">🔄 Save New PIN</button>
               <button class="btn-full btn-save" onclick="copyWhatsAppWardInvite()">📲 Copy WhatsApp Invite</button>
             </div>
           </div>
 
           <div class="admin-card">
-            <div class="admin-card-title"><span>🔐 Change Ward Admin Code</span></div>
+            <div class="admin-card-title"><span>🔐 Change Coordinator PIN</span></div>
             <div class="form-group">
               <div class="pw-wrap">
-                <input type="password" id="sec-new-admin-code" placeholder="New admin code (min 6 chars)" />
-                <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('sec-new-admin-code', this)" title="Show / Hide Code" aria-label="Show or hide new admin code">👁️</button>
+                <input type="password" id="sec-new-admin-code" placeholder="New Coordinator PIN (min 6 chars)" />
+                <button type="button" class="pw-eye-btn" onclick="togglePasswordVisibility('sec-new-admin-code', this)" title="Show / Hide PIN" aria-label="Show or hide new coordinator PIN">👁️</button>
               </div>
             </div>
-            <button class="btn-full btn-danger" onclick="rotateWardAdminCode()">Change Admin Code</button>
+            <button class="btn-full btn-danger" onclick="rotateWardAdminCode()">Change Coordinator PIN</button>
+          </div>
+        </div>
+
+        <!-- TAB 4: Personal App Preferences & Role Lock -->
+        <div id="admin-pane-app" class="admin-pane">
+          <div class="admin-card">
+            <div class="admin-card-title"><span>⚙️ App Preferences (This Device)</span></div>
+            <div class="form-row">
+              <div class="form-group">
+                <label for="adm-cfg-nav-app">Primary Maps App</label>
+                <select id="adm-cfg-nav-app">
+                  <option value="google">Google Maps (Default)</option>
+                  <option value="apple">Apple Maps</option>
+                  <option value="waze">Waze</option>
+                </select>
+              </div>
+              <div class="form-group">
+                <label for="adm-cfg-wakelock">Screen Wake Lock</label>
+                <select id="adm-cfg-wakelock">
+                  <option value="on">Auto Keep Awake (Recommended)</option>
+                  <option value="off">Off</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn-full btn-save" onclick="saveAdminAppPrefs()">💾 Save App Preferences</button>
+          </div>
+
+          <div class="admin-card">
+            <div class="admin-card-title"><span>🔒 Lock Role or Ward</span></div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+              <button class="btn-full btn-secondary" onclick="lockCoordinatorMode(true)">🔒 Lock Coordinator Mode</button>
+              <button class="btn-full btn-danger" onclick="lockCurrentWard()">🔒 Lock Ward</button>
+            </div>
           </div>
         </div>
       </div>
@@ -656,6 +690,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
         <button class="btn-full btn-danger" onclick="lockCurrentWard()">🔒 Lock Ward</button>
         <button class="btn-full btn-save" onclick="saveUserSettings()">Save Settings</button>
       </div>
+      <div style="margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--border-subtle); text-align: center;">
+        <button class="btn-full btn-secondary" style="width: 100%;" onclick="closeModal('settings-modal'); openCoordinatorUnlockModal(true);">🔐 Coordinator? Unlock Admin Settings</button>
+      </div>
     </div>
   </div>
 
@@ -703,9 +740,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=39" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=39" charset="UTF-8"></script>
-  <script src="./songbook.js?v=39" charset="UTF-8"></script>
-  <script src="./app.js?v=39" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=40" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=40" charset="UTF-8"></script>
+  <script src="./songbook.js?v=40" charset="UTF-8"></script>
+  <script src="./app.js?v=40" charset="UTF-8"></script>
 </body>
 </html>

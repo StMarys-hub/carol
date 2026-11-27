@@ -531,7 +531,12 @@ function applyUiPrefs() {
 
   const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
   const adminBtn = document.getElementById("btn-admin-open");
-  if (adminBtn) adminBtn.classList.toggle("admin-unlocked", isAdmin);
+  if (adminBtn) {
+    adminBtn.classList.toggle("admin-unlocked", isAdmin);
+    adminBtn.textContent = isAdmin ? "🔓" : "🔒";
+    adminBtn.title = isAdmin ? "Coordinator Mode Unlocked — Tap to Lock" : "Unlock Coordinator Mode";
+    adminBtn.setAttribute("aria-label", adminBtn.title);
+  }
 
   const roleBadge = document.getElementById("role-mode-badge");
   if (roleBadge) {
@@ -753,16 +758,6 @@ function toggleMapFullscreen() {
 
 window.addEventListener("resize", () => {
   if (snapshotOpen || mapFullscreen) rerenderRouteMapOnly();
-});
-
-window.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  const openModal = document.querySelector(".modal-backdrop.open");
-  if (openModal) {
-    openModal.classList.remove("open");
-    return;
-  }
-  if (mapFullscreen) toggleMapFullscreen();
 });
 
 function toggleMapLabels() {
@@ -2169,11 +2164,11 @@ function openQuickHelpModal() {
   if (isAdmin) {
     titleEl.textContent = `🔐 Coordinator / Admin Guide (${CFG.WARDS[activeWardId].short})`;
     bodyEl.innerHTML = `
-      <div><strong style="color: var(--accent-gold);">1. Live Check-Ins &amp; Shift to Now:</strong> Tap <strong>✓ Arrived</strong> or <strong>⏱️ Shift to Now</strong> to save live progress &amp; current-traffic ETAs to Supabase—every connected caroler's phone automatically snaps into sync.</div>
-      <div><strong style="color: var(--accent-sky);">2. Absent Family or Unplanned House:</strong> Tap <strong>⏭️ Skip / Revisit Later</strong> on the top card to move an absent family before Dinner, or <strong>➕ Add House</strong> to auto-insert an unplanned stop at the shortest detour.</div>
-      <div><strong style="color: var(--accent-mint);">3. Route Map Planning &amp; Bulk Edit:</strong> Inside <strong>🗺️ Route Map</strong> (or <strong>⛶ Full Screen</strong>), tap <strong>＋🏠</strong> to add &amp; auto-optimize a house, or tap any pin to <strong>Reassign Day</strong> or <strong>🗑️ Delete</strong>. In <strong>🔐 Admin → Houses &amp; Route</strong>, use <strong>⚡ Auto-Sort</strong>, <strong>🔄 Reset Check-Ins</strong>, <strong>🗑️ Clear All Houses</strong>, or bulk edit the pre-filled day list.</div>
+      <div><strong style="color: var(--accent-gold);">1. Role Lock (🔓) &amp; Unified Settings (⚙️):</strong> Tap <strong>🔓</strong> to lock/unlock Coordinator Mode anytime. Once unlocked, tap <strong>⚙️</strong> for all configuration: <strong>🏠 Houses &amp; Route</strong>, <strong>📅 Years &amp; Days</strong>, <strong>🔑 PINs &amp; Alerts</strong>, and <strong>⚙️ App Prefs</strong>.</div>
+      <div><strong style="color: var(--accent-sky);">2. Live Check-Ins, Skip &amp; Shift to Now:</strong> Tap <strong>✓ Arrived</strong> or <strong>⏱️ Shift to Now</strong> to save live progress &amp; current-traffic ETAs to Supabase—every connected caroler's phone snaps into sync. Use <strong>⏭️ Skip / Revisit Later</strong> for absent families.</div>
+      <div><strong style="color: var(--accent-mint);">3. Route Map Planning &amp; Bulk Edit:</strong> Inside <strong>🗺️ Route Map</strong> (or <strong>⛶ Full Screen</strong>), tap <strong>＋🏠</strong> to add &amp; auto-optimize a house, or tap any pin to <strong>Reassign Day</strong> or <strong>🗑️ Delete</strong>. In <strong>⚙️ → Houses &amp; Route</strong>, use <strong>⚡ Auto-Sort</strong>, <strong>🔄 Reset Check-Ins</strong>, <strong>🗑️ Clear All Houses</strong>, or bulk edit the pre-filled day list.</div>
       <div><strong style="color: var(--accent-purple);">4. Songbook Approvals &amp; Karaoke:</strong> Open <strong>🎵 Songbook</strong> to review <strong>🔔 Pending Song Approvals</strong> (Preview / Approve / Reject), or tap <strong>✏️ Edit</strong> on any song to attach a YouTube or MP3 karaoke track.</div>
-      <div><strong style="color: var(--accent-crimson-soft);">5. Broadcast &amp; Ward Code Invite:</strong> Tap <strong>📢 Broadcast</strong> to pop up a live announcement on all phones, or go to <strong>🔐 Admin → Code &amp; Broadcast</strong> to reset the Ward PIN and share the 1-tap WhatsApp Invite.</div>
+      <div><strong style="color: var(--accent-crimson-soft);">5. PINs &amp; Live Alerts:</strong> Tap <strong>📢 Broadcast</strong> for instant popups, or open <strong>⚙️ → 🔑 PINs &amp; Alerts</strong> to update the Ward Access PIN, share the 1-tap WhatsApp Invite, or change the Coordinator PIN.</div>
     `;
   } else {
     titleEl.textContent = "❓ How to Use St. Mary's Carol App";
@@ -2824,42 +2819,78 @@ async function approveOrRejectSong(songId, approve, title) {
   }
 }
 
-// ---------- Ward Admin Portal (4 Tabs) ----------
+// ---------- Coordinator Role Lock (🔒/🔓) & Unified Settings/Admin Hub (⚙️) ----------
+
+let openSettingsAfterUnlock = false;
+
+function toggleCoordinatorLock() {
+  const isUnlocked = adminSession.unlocked && adminSession.wardId === activeWardId;
+  if (isUnlocked) {
+    lockCoordinatorMode(true);
+    return;
+  }
+  openCoordinatorUnlockModal(false);
+}
+
+function lockCoordinatorMode(askConfirm = true) {
+  if (askConfirm && !window.confirm("Lock Coordinator Mode and return to Parishioner view?")) {
+    return;
+  }
+  adminSession = { unlocked: false, code: "", role: null, wardId: null };
+  closeModal("admin-modal");
+  applyUiPrefs();
+  render();
+  showToast("🔒 Coordinator Mode locked");
+}
+
+function openCoordinatorUnlockModal(openSettingsOnSuccess = false) {
+  openSettingsAfterUnlock = !!openSettingsOnSuccess;
+  document.getElementById("admin-gate-ward-name").textContent = CFG.WARDS[activeWardId].full;
+  document.getElementById("admin-modal-title").textContent = `🔒 Unlock Coordinator • ${CFG.WARDS[activeWardId].short}`;
+  document.getElementById("admin-login-gate").style.display = "block";
+  document.getElementById("admin-portal-body").style.display = "none";
+  document.getElementById("admin-login-error").textContent = "";
+  document.getElementById("admin-modal").classList.add("open");
+  setTimeout(() => document.getElementById("admin-code-input")?.focus(), 80);
+}
 
 function openAdminModal() {
-  document.getElementById("admin-gate-ward-name").textContent = CFG.WARDS[activeWardId].full;
-  document.getElementById("admin-modal-title").textContent = `🔐 Admin • ${CFG.WARDS[activeWardId].short}`;
   const isUnlocked = adminSession.unlocked && adminSession.wardId === activeWardId;
-  document.getElementById("admin-login-gate").style.display = isUnlocked ? "none" : "block";
-  document.getElementById("admin-portal-body").style.display = isUnlocked ? "block" : "none";
-  document.getElementById("admin-login-error").textContent = "";
-  if (isUnlocked) populateAdminControls();
-  document.getElementById("admin-modal").classList.add("open");
+  if (isUnlocked) openSettingsModal();
+  else openCoordinatorUnlockModal(true);
 }
 
 async function handleAdminVerify() {
   const code = document.getElementById("admin-code-input").value.trim();
   const errEl = document.getElementById("admin-login-error");
-  if (!code) return (errEl.textContent = "Enter Admin Code.");
-  if (!initSupabaseClient()) return (errEl.textContent = "Connect Supabase in ⚙️ Settings first.");
+  if (!code) return (errEl.textContent = "Enter Coordinator PIN.");
+  if (!initSupabaseClient()) return (errEl.textContent = "Unable to connect to Supabase.");
 
   const { data, error } = await sbClient.rpc("verify_ward_admin_code", {
     p_ward_id: activeWardId,
     p_admin_code: code
   });
   if (error || !data || !data.ok) {
-    errEl.textContent = data && data.error === "RATE_LIMITED" ? "Rate limited. Wait 15 mins." : "Invalid Admin Code for this ward.";
+    errEl.textContent = data && data.error === "RATE_LIMITED" ? "Rate limited. Wait 15 mins." : "Invalid Coordinator PIN for this ward.";
     return;
   }
 
   adminSession = { unlocked: true, code, role: data.role, wardId: activeWardId };
   document.getElementById("admin-code-input").value = "";
-  document.getElementById("admin-login-gate").style.display = "none";
-  document.getElementById("admin-portal-body").style.display = "block";
   applyUiPrefs();
   populateAdminControls();
   render();
-  showToast(`Admin unlocked (${data.role}) for ${CFG.WARDS[activeWardId].short}`);
+
+  if (openSettingsAfterUnlock) {
+    openSettingsAfterUnlock = false;
+    document.getElementById("admin-modal-title").textContent = `⚙️ Settings & Admin • ${CFG.WARDS[activeWardId].short}`;
+    document.getElementById("admin-login-gate").style.display = "none";
+    document.getElementById("admin-portal-body").style.display = "block";
+    showToast(`🔓 Coordinator unlocked (${CFG.WARDS[activeWardId].short})`);
+  } else {
+    closeModal("admin-modal");
+    showToast(`🔓 Coordinator Mode unlocked — tap ⚙️ for Settings & Houses`);
+  }
 }
 
 function switchAdminTab(tabName, btnEl) {
@@ -3862,9 +3893,32 @@ async function rotateWardAdminCode() {
 // ---------- User Settings & Utilities ----------
 
 function openSettingsModal() {
+  const isUnlocked = adminSession.unlocked && adminSession.wardId === activeWardId;
+  if (isUnlocked) {
+    const admNav = document.getElementById("adm-cfg-nav-app");
+    const admWake = document.getElementById("adm-cfg-wakelock");
+    if (admNav) admNav.value = prefs.primaryNavApp || "google";
+    if (admWake) admWake.value = prefs.autoWakeLock ? "on" : "off";
+    document.getElementById("admin-modal-title").textContent = `⚙️ Settings & Admin • ${CFG.WARDS[activeWardId].short}`;
+    document.getElementById("admin-login-gate").style.display = "none";
+    document.getElementById("admin-portal-body").style.display = "block";
+    populateAdminControls();
+    document.getElementById("admin-modal").classList.add("open");
+    return;
+  }
   document.getElementById("cfg-nav-app").value = prefs.primaryNavApp || "google";
   document.getElementById("cfg-wakelock").value = prefs.autoWakeLock ? "on" : "off";
   document.getElementById("settings-modal").classList.add("open");
+}
+
+function saveAdminAppPrefs() {
+  prefs.primaryNavApp = document.getElementById("adm-cfg-nav-app").value;
+  prefs.autoWakeLock = document.getElementById("adm-cfg-wakelock").value === "on";
+  savePrefs();
+  if (prefs.autoWakeLock) acquireWakeLockIfEnabled();
+  else releaseWakeLock();
+  render();
+  showToast("App preferences saved");
 }
 
 function saveUserSettings() {
