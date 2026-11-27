@@ -498,20 +498,61 @@ body {
 .map-day-pill {
   background: var(--bg-surface-elevated);
   border: 1.5px solid var(--border-strong);
-  color: var(--text-secondary);
-  border-radius: 99px;
-  padding: 5px 11px;
-  font-size: 0.78rem;
-  font-weight: 800;
+  color: var(--text-primary);
+  border-radius: 12px;
+  padding: 6px 11px;
+  min-width: 144px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  text-align: left;
   white-space: nowrap;
   cursor: pointer;
   font-family: inherit;
   flex-shrink: 0;
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.map-day-pill-top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.map-day-title {
+  font-size: 0.82rem;
+  font-weight: 900;
+  letter-spacing: -0.01em;
+}
+.map-day-stops {
+  font-size: 0.68rem;
+  font-weight: 800;
+  padding: 1px 6px;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.09);
+  color: var(--text-secondary);
+}
+body.light-theme .map-day-stops {
+  background: rgba(15, 23, 42, 0.08);
+}
+.map-day-pill-meta {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--text-secondary);
+  opacity: 0.88;
 }
 .map-day-pill.active {
   background: var(--accent-gold);
-  color: #000000;
+  color: #09130F;
   border-color: var(--accent-gold);
+  box-shadow: 0 2px 10px rgba(245, 158, 11, 0.28);
+}
+.map-day-pill.active .map-day-stops {
+  background: rgba(0, 0, 0, 0.14);
+  color: #09130F;
+}
+.map-day-pill.active .map-day-pill-meta {
+  color: #09130F;
+  opacity: 0.82;
 }
 .route-svg-stage {
   position: relative;

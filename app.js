@@ -657,6 +657,14 @@ function minutesToTimeStr(totalMins) {
   return `${h12}:${String(m).padStart(2, "0")} ${period}`;
 }
 
+function formatDriveDuration(totalMins) {
+  const m = Math.max(0, Math.round(Number(totalMins) || 0));
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rem = m % 60;
+  return rem > 0 ? `${h}h ${rem}m` : `${h}h`;
+}
+
 function calculateSchedule(dayObj, houses) {
   const defaultVisit = (dayObj && dayObj.avg_visit_mins) || 20;
   let cursor = timeStrToMinutes(dayObj ? dayObj.start_time : "14:00");
@@ -1564,7 +1572,7 @@ function render() {
   document.getElementById("metric-ratios").textContent = `${totalTravelMins}m (${totalMiles.toFixed(1)} mi)`;
   document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
 
-  // Snapshot Map + In-Map Day Switcher + Top-Left Mileage HUD + Chunked Multi-Stop Google Maps Legs
+  // Snapshot Map + In-Map Day Switcher (2-line cards) + Fallback Single-Day HUD + Chunked Multi-Stop Google Maps Legs
   const mapDaySwitcher = document.getElementById("map-day-switcher");
   if (mapDaySwitcher) {
     if (days.length <= 1) {
@@ -1575,20 +1583,30 @@ function render() {
       mapDaySwitcher.innerHTML = days
         .map((d) => {
           const dHouses = getDayHouses(d.id);
-          const dMiles = calculateSchedule(d, dHouses).totalMiles;
-          return `<button class="map-day-pill ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">🎄 ${escapeHtml(d.label)} • ${dHouses.length} • ${dMiles.toFixed(1)} mi</button>`;
+          const dSched = calculateSchedule(d, dHouses);
+          const stopWord = dHouses.length === 1 ? "stop" : "stops";
+          return `
+            <button class="map-day-pill ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">
+              <span class="map-day-pill-top">
+                <span class="map-day-title">🎄 ${escapeHtml(d.label)}</span>
+                <span class="map-day-stops">${dHouses.length} ${stopWord}</span>
+              </span>
+              <span class="map-day-pill-meta">🚗 ${dSched.totalMiles.toFixed(1)} mi · ${formatDriveDuration(dSched.totalTravelMins)}</span>
+            </button>
+          `;
         })
         .join("");
     }
   }
   const mapStatsHud = document.getElementById("map-stats-hud");
   if (mapStatsHud) {
-    if (!computed.length) {
+    // Only show floating HUD when single-day (multi-day stats already live cleanly in the day cards above)
+    if (!computed.length || days.length > 1) {
       mapStatsHud.classList.add("hidden");
       mapStatsHud.textContent = "";
     } else {
       mapStatsHud.classList.remove("hidden");
-      mapStatsHud.textContent = `🚗 ${totalMiles.toFixed(1)} mi • ${totalTravelMins}m`;
+      mapStatsHud.textContent = `🚗 ${totalMiles.toFixed(1)} mi · ${formatDriveDuration(totalTravelMins)}`;
     }
   }
   document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
