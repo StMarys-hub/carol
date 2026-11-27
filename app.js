@@ -755,6 +755,16 @@ window.addEventListener("resize", () => {
   if (snapshotOpen || mapFullscreen) rerenderRouteMapOnly();
 });
 
+window.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape") return;
+  const openModal = document.querySelector(".modal-backdrop.open");
+  if (openModal) {
+    openModal.classList.remove("open");
+    return;
+  }
+  if (mapFullscreen) toggleMapFullscreen();
+});
+
 function toggleMapLabels() {
   mapShowLabels = !mapShowLabels;
   const btn = document.getElementById("btn-map-labels");
@@ -851,6 +861,7 @@ async function moveMapPinHouseToDay(houseId) {
     const movedHouse = {
       ...existing,
       carol_day_id: newDayId,
+      stop_role: null,
       visited: false,
       checked_in_at: null
     };
@@ -1110,7 +1121,8 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   const allPts = [...activePts, ...otherDayGroups.flatMap((g) => g.houses)];
 
   if (allPts.length < 2) {
-    return `<div style="padding:14px;text-align:center;color:var(--text-muted);font-size:0.8rem;">Add geocoded coordinates in Admin to preview the offline map.</div>`;
+    const isAdminNow = adminSession.unlocked && adminSession.wardId === activeWardId;
+    return `<div style="padding:26px 14px;text-align:center;color:var(--text-muted);font-size:0.82rem;">No stops plotted for this day yet.${isAdminNow ? " Tap <strong>＋🏠</strong> above or open <strong>🔐 Admin</strong> to add houses." : ""}</div>`;
   }
 
   const lats = allPts.map((p) => p.lat);
@@ -1255,6 +1267,10 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   let activeLinesSvg = "";
   let legBadgesSvg = "";
   const placedBoxes = []; // Track placed label & distance pill boxes for collision avoidance
+  const ctrlAvoidBoxes = [
+    { x1: W - 92, y1: 0, x2: W, y2: 44 },        // Top-right [＋🏠][⛶]
+    { x1: W - 168, y1: H - 44, x2: W, y2: H }    // Bottom-right [mi][Aa]|[－][＋]
+  ];
 
   function boxesOverlap(a, b) {
     return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
@@ -1303,17 +1319,19 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     if (mapShowMiles && segLen >= 42 && (isWalk || typeof legMiles === "number")) {
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
-      if (mx > 24 && mx < W - 46 && my > 34 && my < H - 14) {
+      if (mx > 20 && mx < W - 18 && my > 16 && my < H - 14) {
         const badgeText = isWalk ? "🚶" : `${legMiles < 10 ? legMiles.toFixed(1) : Math.round(legMiles)} mi`;
         const bw = isWalk ? 18 : Math.max(30, badgeText.length * 4.8 + 9);
         const bh = 13;
         const box = { x1: mx - bw / 2, y1: my - bh / 2, x2: mx + bw / 2, y2: my + bh / 2 };
 
-        let collides = false;
-        for (const op of valid) {
-          if (boxesOverlap(box, { x1: op.x - 12, y1: op.y - 12, x2: op.x + 12, y2: op.y + 12 })) {
-            collides = true;
-            break;
+        let collides = ctrlAvoidBoxes.some((cb) => boxesOverlap(box, cb));
+        if (!collides) {
+          for (const op of valid) {
+            if (boxesOverlap(box, { x1: op.x - 12, y1: op.y - 12, x2: op.x + 12, y2: op.y + 12 })) {
+              collides = true;
+              break;
+            }
           }
         }
         if (!collides) {
@@ -1399,10 +1417,9 @@ function renderOfflineRouteSvg(computed, nextIndex) {
         const box = { x1: c.x1, y1: c.y1, x2: c.x1 + lw, y2: c.y1 + lh };
         let score = 0;
 
-        // Penalize going off-canvas
-        if (box.x1 < 4) score += 40;
-        if (box.x2 > W - 44) score += 40; // avoid right zoom toolbar
-        if (box.y1 < 4 || box.y2 > H - 4) score += 40;
+        // Penalize going off-canvas or overlapping corner map controls
+        if (box.x1 < 4 || box.x2 > W - 4 || box.y1 < 4 || box.y2 > H - 4) score += 45;
+        if (ctrlAvoidBoxes.some((cb) => boxesOverlap(box, cb))) score += 60;
 
         // Heavy penalty for overlapping any already-placed label
         for (const pb of placedBoxes) {
@@ -1664,8 +1681,13 @@ function render() {
 
   document.getElementById("metric-progress").textContent = `${completedStops.length} / ${computed.length}`;
   document.getElementById("metric-dinner-eta").textContent = finalStop ? finalStop.arrivalFormatted : "--:--";
-  document.getElementById("metric-ratios").textContent = `${totalTravelMins}m (${totalMiles.toFixed(1)} mi)`;
+  document.getElementById("metric-ratios").textContent = `${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)`;
   document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
+
+  const mapAddBtn = document.getElementById("btn-map-add-house");
+  if (mapAddBtn) {
+    mapAddBtn.style.display = adminSession.unlocked && adminSession.wardId === activeWardId ? "grid" : "none";
+  }
 
   // Snapshot Map + In-Map Day Switcher (2-line cards) + Fallback Single-Day HUD + Chunked Multi-Stop Google Maps Legs
   const mapDaySwitcher = document.getElementById("map-day-switcher");
@@ -2041,7 +2063,7 @@ function openQuickHelpModal() {
     bodyEl.innerHTML = `
       <div><strong style="color: var(--accent-gold);">1. Live Check-Ins &amp; Shift to Now:</strong> Tap <strong>✓ Arrived</strong> or <strong>⏱️ Shift to Now</strong> to save live progress &amp; current-traffic ETAs to Supabase—every connected caroler's phone automatically snaps into sync.</div>
       <div><strong style="color: var(--accent-sky);">2. Absent Family or Unplanned House:</strong> Tap <strong>⏭️ Skip / Revisit Later</strong> on the top card to move an absent family before Dinner, or <strong>➕ Add House</strong> to auto-insert an unplanned stop at the shortest detour.</div>
-      <div><strong style="color: var(--accent-mint);">3. Bulk Edit &amp; Auto-Sort Route:</strong> Open <strong>🔐 Admin → Houses &amp; Route</strong>. The selected day is pre-filled in <strong>Paste / Bulk Edit Houses</strong> for quick edits; tap <strong>⚡ Auto-Sort Best Route → 💾 Save Order</strong> to optimize with START/END pinned, or <strong>🔄 Reset Check-Ins</strong> after dry-run testing.</div>
+      <div><strong style="color: var(--accent-mint);">3. Route Map Planning &amp; Bulk Edit:</strong> Inside <strong>🗺️ Route Map</strong> (or <strong>⛶ Full Screen</strong>), tap <strong>＋🏠</strong> to add &amp; auto-optimize a house, or tap any pin to <strong>Reassign Day</strong> or <strong>🗑️ Delete</strong>. In <strong>🔐 Admin → Houses &amp; Route</strong>, use <strong>⚡ Auto-Sort</strong>, <strong>🔄 Reset Check-Ins</strong>, <strong>🗑️ Clear All Houses</strong>, or bulk edit the pre-filled day list.</div>
       <div><strong style="color: var(--accent-purple);">4. Songbook Approvals &amp; Karaoke:</strong> Open <strong>🎵 Songbook</strong> to review <strong>🔔 Pending Song Approvals</strong> (Preview / Approve / Reject), or tap <strong>✏️ Edit</strong> on any song to attach a YouTube or MP3 karaoke track.</div>
       <div><strong style="color: var(--accent-crimson-soft);">5. Broadcast &amp; Ward Code Invite:</strong> Tap <strong>📢 Broadcast</strong> to pop up a live announcement on all phones, or go to <strong>🔐 Admin → Code &amp; Broadcast</strong> to reset the Ward PIN and share the 1-tap WhatsApp Invite.</div>
     `;
@@ -3414,8 +3436,8 @@ async function clearAllHousesInSelectedDay() {
   });
 
   if (!error && data && data.ok) {
-    if (dayId === activeDayId && typeof stopHouseTimer === "function") {
-      stopHouseTimer(true);
+    if (dayId === activeDayId) {
+      resetHouseTimer(null, 20);
     }
     await syncActiveWardOnline(true);
     broadcastPiiFreeEtaShift(dayId, 0, new Date().toISOString());
