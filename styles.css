@@ -590,7 +590,14 @@ body.light-theme .map-stats-hud {
   overflow: hidden;
   border-radius: 6px;
   touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
   cursor: grab;
+}
+#route-svg-container,
+#route-svg-container svg {
+  touch-action: none;
+  will-change: transform;
 }
 .route-svg-viewport:active {
   cursor: grabbing;

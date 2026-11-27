@@ -1018,45 +1018,103 @@ function initRouteMapPanHandlers() {
   if (!vp || vp.dataset.panBound) return;
   vp.dataset.panBound = "1";
 
-  // Mouse / single-pointer pan
+  const getContainer = () => document.getElementById("route-svg-container");
+
+  // Mouse / single-pointer pan (non-touch)
   vp.addEventListener("pointerdown", (e) => {
-    if (e.pointerType === "touch") return; // handled by touch events for clean pinch + pan
+    if (e.pointerType === "touch") return;
     if (mapZoom <= 1) return;
     mapDrag = { startX: e.clientX, startY: e.clientY, origX: mapPanX, origY: mapPanY };
   });
 
   window.addEventListener("pointermove", (e) => {
-    if (!mapDrag) return;
+    if (e.pointerType === "touch" || !mapDrag) return;
     mapPanX = mapDrag.origX + (e.clientX - mapDrag.startX);
     mapPanY = mapDrag.origY + (e.clientY - mapDrag.startY);
     scheduleMapRerender();
   });
 
-  window.addEventListener("pointerup", () => {
+  window.addEventListener("pointerup", (e) => {
+    if (e.pointerType === "touch") return;
     mapDrag = null;
   });
 
-  // Native Mobile Touch: 2-finger Pinch-to-Zoom + 1-finger Pan
+  // Block iOS Safari native page pinch-zoom inside the map viewport
+  ["gesturestart", "gesturechange", "gestureend"].forEach((evt) => {
+    vp.addEventListener(evt, (e) => e.preventDefault(), { passive: false });
+  });
+
+  // Native Mobile Touch: 60fps GPU-transformed 2-finger Pinch-to-Zoom + 1-finger Pan
+  // (Never replaces innerHTML mid-gesture so iOS/Android touchmove targets never detach!)
+  let touchPan = null;
+
+  function commitPinchOrPan() {
+    const el = getContainer();
+    if (mapPinch && mapPinch.moved) {
+      mapZoom = mapPinch.pendingZoom;
+      mapPanX = mapPinch.pendingPanX;
+      mapPanY = mapPinch.pendingPanY;
+      if (el) el.style.transform = "";
+      mapPinch = null;
+      rerenderRouteMapOnly();
+      return;
+    }
+    if (touchPan && touchPan.moved) {
+      mapPanX = touchPan.pendingPanX;
+      mapPanY = touchPan.pendingPanY;
+      if (el) el.style.transform = "";
+      touchPan = null;
+      rerenderRouteMapOnly();
+      return;
+    }
+    if (el) el.style.transform = "";
+    mapPinch = null;
+    touchPan = null;
+  }
+
   vp.addEventListener(
     "touchstart",
     (e) => {
       if (e.touches.length === 2) {
         e.preventDefault();
-        mapDrag = null;
+        // If user was mid-pan before putting 2nd finger down, commit pan first
+        if (touchPan && touchPan.moved) {
+          mapPanX = touchPan.pendingPanX;
+          mapPanY = touchPan.pendingPanY;
+          const el = getContainer();
+          if (el) el.style.transform = "";
+          rerenderRouteMapOnly();
+        }
+        touchPan = null;
         const t1 = e.touches[0];
         const t2 = e.touches[1];
+        const rect = vp.getBoundingClientRect();
         mapPinch = {
           startDist: Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1,
           startZoom: mapZoom,
           startMidX: (t1.clientX + t2.clientX) / 2,
           startMidY: (t1.clientY + t2.clientY) / 2,
+          cx: rect.left + rect.width / 2,
+          cy: rect.top + rect.height / 2,
           origPanX: mapPanX,
-          origPanY: mapPanY
+          origPanY: mapPanY,
+          pendingZoom: mapZoom,
+          pendingPanX: mapPanX,
+          pendingPanY: mapPanY,
+          moved: false
         };
       } else if (e.touches.length === 1 && mapZoom > 1) {
         mapPinch = null;
         const t = e.touches[0];
-        mapDrag = { startX: t.clientX, startY: t.clientY, origX: mapPanX, origY: mapPanY };
+        touchPan = {
+          startX: t.clientX,
+          startY: t.clientY,
+          origX: mapPanX,
+          origY: mapPanY,
+          pendingPanX: mapPanX,
+          pendingPanY: mapPanY,
+          moved: false
+        };
       }
     },
     { passive: false }
@@ -1065,31 +1123,81 @@ function initRouteMapPanHandlers() {
   vp.addEventListener(
     "touchmove",
     (e) => {
-      if (e.touches.length === 2 && mapPinch) {
+      const el = getContainer();
+      if (e.touches.length === 2) {
         e.preventDefault();
+        if (!mapPinch) {
+          const t1 = e.touches[0];
+          const t2 = e.touches[1];
+          const rect = vp.getBoundingClientRect();
+          mapPinch = {
+            startDist: Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1,
+            startZoom: mapZoom,
+            startMidX: (t1.clientX + t2.clientX) / 2,
+            startMidY: (t1.clientY + t2.clientY) / 2,
+            cx: rect.left + rect.width / 2,
+            cy: rect.top + rect.height / 2,
+            origPanX: mapPanX,
+            origPanY: mapPanY,
+            pendingZoom: mapZoom,
+            pendingPanX: mapPanX,
+            pendingPanY: mapPanY,
+            moved: false
+          };
+          return;
+        }
         const t1 = e.touches[0];
         const t2 = e.touches[1];
         const dist = Math.hypot(t2.clientX - t1.clientX, t2.clientY - t1.clientY) || 1;
         const midX = (t1.clientX + t2.clientX) / 2;
         const midY = (t1.clientY + t2.clientY) / 2;
-        mapZoom = Math.max(1, Math.min(5, Number((mapPinch.startZoom * (dist / mapPinch.startDist)).toFixed(2))));
-        mapPanX = mapPinch.origPanX + (midX - mapPinch.startMidX);
-        mapPanY = mapPinch.origPanY + (midY - mapPinch.startMidY);
-        scheduleMapRerender();
-      } else if (e.touches.length === 1 && mapDrag && mapZoom > 1) {
-        e.preventDefault();
+        const nextZoom = Math.max(1, Math.min(5, Number((mapPinch.startZoom * (dist / mapPinch.startDist)).toFixed(3))));
+        const s = nextZoom / mapPinch.startZoom;
+        const dx = midX - mapPinch.startMidX;
+        const dy = midY - mapPinch.startMidY;
+        const ox = mapPinch.startMidX - mapPinch.cx;
+        const oy = mapPinch.startMidY - mapPinch.cy;
+        const tx = dx + ox * (1 - s);
+        const ty = dy + oy * (1 - s);
+
+        mapPinch.pendingZoom = nextZoom;
+        mapPinch.pendingPanX = mapPinch.origPanX * s + tx;
+        mapPinch.pendingPanY = mapPinch.origPanY * s + ty;
+        mapPinch.moved = true;
+
+        if (el) {
+          el.style.transformOrigin = "center center";
+          el.style.transform = `translate3d(${tx.toFixed(1)}px, ${ty.toFixed(1)}px, 0) scale(${s.toFixed(3)})`;
+        }
+      } else if (e.touches.length === 1 && touchPan && mapZoom > 1) {
         const t = e.touches[0];
-        mapPanX = mapDrag.origX + (t.clientX - mapDrag.startX);
-        mapPanY = mapDrag.origY + (t.clientY - mapDrag.startY);
-        scheduleMapRerender();
+        const dx = t.clientX - touchPan.startX;
+        const dy = t.clientY - touchPan.startY;
+        if (Math.hypot(dx, dy) > 4) {
+          e.preventDefault();
+          touchPan.pendingPanX = touchPan.origX + dx;
+          touchPan.pendingPanY = touchPan.origY + dy;
+          touchPan.moved = true;
+          if (el) {
+            el.style.transformOrigin = "center center";
+            el.style.transform = `translate3d(${dx.toFixed(1)}px, ${dy.toFixed(1)}px, 0)`;
+          }
+        }
       }
     },
     { passive: false }
   );
 
   vp.addEventListener("touchend", (e) => {
-    if (e.touches.length < 2) mapPinch = null;
-    if (e.touches.length === 0) mapDrag = null;
+    if (e.touches.length < 2 && mapPinch) {
+      commitPinchOrPan();
+    } else if (e.touches.length === 0 && touchPan) {
+      commitPinchOrPan();
+    }
+  });
+
+  vp.addEventListener("touchcancel", () => {
+    commitPinchOrPan();
   });
 
   vp.addEventListener(
