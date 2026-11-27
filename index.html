@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=33" />
+  <link rel="stylesheet" href="./styles.css?v=34" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -133,10 +133,12 @@
           <div id="route-svg-wrap" class="route-svg-wrap">
             <div id="map-day-switcher" class="map-day-switcher" aria-label="Switch Carol Day on Map"></div>
             <div class="route-svg-stage">
+              <div id="map-stats-hud" class="map-stats-hud" aria-live="polite"></div>
               <div class="map-zoom-controls" aria-label="Map controls">
                 <button id="btn-map-fullscreen" class="map-zoom-btn" onclick="toggleMapFullscreen()" title="Full Screen Map" aria-label="Full Screen Map">⛶</button>
                 <button class="map-zoom-btn" onclick="zoomRouteMap(0.45)" title="Zoom In" aria-label="Zoom In">＋</button>
                 <button class="map-zoom-btn" onclick="zoomRouteMap(-0.45)" title="Zoom Out" aria-label="Zoom Out">－</button>
+                <button id="btn-map-miles" class="map-zoom-btn active" onclick="toggleMapMiles()" title="Toggle Leg Miles" aria-label="Toggle Leg Miles" style="font-size:0.7rem;">mi</button>
                 <button id="btn-map-labels" class="map-zoom-btn" onclick="toggleMapLabels()" title="Toggle Family Names" aria-label="Toggle Family Names" style="font-size:0.72rem;">Aa</button>
                 <button class="map-zoom-btn" onclick="resetRouteMapZoom()" title="Reset Zoom" aria-label="Reset Zoom" style="font-size:0.78rem;">↺</button>
               </div>
@@ -688,9 +690,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=33" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=33" charset="UTF-8"></script>
-  <script src="./songbook.js?v=33" charset="UTF-8"></script>
-  <script src="./app.js?v=33" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=34" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=34" charset="UTF-8"></script>
+  <script src="./songbook.js?v=34" charset="UTF-8"></script>
+  <script src="./app.js?v=34" charset="UTF-8"></script>
 </body>
 </html>

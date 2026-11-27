@@ -726,6 +726,7 @@ let mapPanY = 0;
 let mapDrag = null;
 let mapFullscreen = false;
 let mapShowLabels = false;
+let mapShowMiles = true;
 let lastMapRenderArgs = null;
 
 function toggleMapFullscreen() {
@@ -750,6 +751,13 @@ function toggleMapLabels() {
   mapShowLabels = !mapShowLabels;
   const btn = document.getElementById("btn-map-labels");
   if (btn) btn.classList.toggle("active", mapShowLabels);
+  rerenderRouteMapOnly();
+}
+
+function toggleMapMiles() {
+  mapShowMiles = !mapShowMiles;
+  const btn = document.getElementById("btn-map-miles");
+  if (btn) btn.classList.toggle("active", mapShowMiles);
   rerenderRouteMapOnly();
 }
 
@@ -1153,27 +1161,89 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   }
 
   let activeLinesSvg = "";
-  for (let i = 1; i < computed.length; i++) {
-    const p1 = projected[i - 1];
-    const p2 = projected[i];
-    if (!p1 || !p2) continue;
-    const isWalk = (computed[i].distance_label || "").toLowerCase().includes("walk");
-    const isDone = computed[i - 1].visited && computed[i].visited;
-    const stroke = isDone
-      ? (isLight ? "#059669" : "#34D399")
-      : isWalk
-      ? (isLight ? "#9333EA" : "#C084FC")
-      : (isLight ? "#0284C7" : "#38BDF8");
-    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="2.6" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
-  }
-
-  let activePinsSvg = "";
-  let labelsSvg = "";
-  const placedBoxes = []; // Track placed label boxes for 8-direction collision avoidance
+  let legBadgesSvg = "";
+  const placedBoxes = []; // Track placed label & distance pill boxes for collision avoidance
 
   function boxesOverlap(a, b) {
     return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
   }
+
+  for (let i = 1; i < computed.length; i++) {
+    const p1 = projected[i - 1];
+    const p2 = projected[i];
+    if (!p1 || !p2) continue;
+    const stop = computed[i];
+    const prevStop = computed[i - 1];
+    const isWalk = (stop.distance_label || "").toLowerCase().includes("walk");
+    const isDone = prevStop.visited && stop.visited;
+
+    // Extract clean driving miles for this leg (distance_label first, Haversine*1.28 fallback)
+    let legMiles = null;
+    const miMatch = String(stop.distance_label || "").match(/(\d+(?:\.\d+)?)\s*mi/i);
+    if (miMatch) {
+      legMiles = parseFloat(miMatch[1]);
+    } else if (typeof prevStop.lat === "number" && typeof stop.lat === "number") {
+      legMiles = window.CarolOptimizer.haversineMiles(prevStop.lat, prevStop.lng, stop.lat, stop.lng) * 1.28;
+    }
+    const isLongLeg = !isWalk && typeof legMiles === "number" && legMiles >= 3.0;
+
+    const stroke = isDone
+      ? (isLight ? "#059669" : "#34D399")
+      : isWalk
+      ? (isLight ? "#9333EA" : "#C084FC")
+      : isLongLeg
+      ? (isLight ? "#D97706" : "#FBBF24")
+      : (isLight ? "#0284C7" : "#38BDF8");
+    activeLinesSvg += `<line x1="${p1.x.toFixed(1)}" y1="${p1.y.toFixed(1)}" x2="${p2.x.toFixed(1)}" y2="${p2.y.toFixed(1)}" stroke="${stroke}" stroke-width="${isLongLeg ? "2.9" : "2.6"}" ${isWalk ? 'stroke-dasharray="4 3"' : ""} />`;
+
+    // Smart collision-safe per-leg distance pill on segments long enough (>= 42px)
+    const segLen = Math.hypot(p2.x - p1.x, p2.y - p1.y);
+    if (mapShowMiles && segLen >= 42 && (isWalk || typeof legMiles === "number")) {
+      const mx = (p1.x + p2.x) / 2;
+      const my = (p1.y + p2.y) / 2;
+      if (mx > 24 && mx < W - 46 && my > 34 && my < H - 14) {
+        const badgeText = isWalk ? "🚶" : `${legMiles < 10 ? legMiles.toFixed(1) : Math.round(legMiles)} mi`;
+        const bw = isWalk ? 18 : Math.max(30, badgeText.length * 4.8 + 9);
+        const bh = 13;
+        const box = { x1: mx - bw / 2, y1: my - bh / 2, x2: mx + bw / 2, y2: my + bh / 2 };
+
+        let collides = false;
+        for (const op of valid) {
+          if (boxesOverlap(box, { x1: op.x - 12, y1: op.y - 12, x2: op.x + 12, y2: op.y + 12 })) {
+            collides = true;
+            break;
+          }
+        }
+        if (!collides) {
+          for (const pb of placedBoxes) {
+            if (boxesOverlap(box, pb)) {
+              collides = true;
+              break;
+            }
+          }
+        }
+
+        if (!collides) {
+          placedBoxes.push(box);
+          const bgFill = isLight
+            ? (isLongLeg ? "rgba(254,243,199,0.95)" : "rgba(255,255,255,0.92)")
+            : (isLongLeg ? "rgba(69,26,3,0.9)" : "rgba(4,14,11,0.86)");
+          const txtFill = isLight
+            ? (isLongLeg ? "#92400E" : "#0F172A")
+            : (isLongLeg ? "#FDE68A" : "#E2E8F0");
+          legBadgesSvg += `
+            <g style="pointer-events:none;">
+              <rect x="${box.x1.toFixed(1)}" y="${box.y1.toFixed(1)}" width="${bw.toFixed(1)}" height="${bh}" rx="6.5" fill="${bgFill}" stroke="${stroke}" stroke-width="1" />
+              <text x="${mx.toFixed(1)}" y="${(my + 2.7).toFixed(1)}" text-anchor="middle" fill="${txtFill}" font-size="7.6" font-weight="800" font-family="sans-serif">${badgeText}</text>
+            </g>
+          `;
+        }
+      }
+    }
+  }
+
+  let activePinsSvg = "";
+  let labelsSvg = "";
 
   computed.forEach((s, idx) => {
     const p = projected[idx];
@@ -1274,7 +1344,7 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     `;
   }
 
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${activePinsSvg}${labelsSvg}${userDotSvg}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${otherDaysSvg}${activeLinesSvg}${legBadgesSvg}${activePinsSvg}${labelsSvg}${userDotSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
@@ -1494,7 +1564,7 @@ function render() {
   document.getElementById("metric-ratios").textContent = `${totalTravelMins}m (${totalMiles.toFixed(1)} mi)`;
   document.getElementById("progress-fill").style.width = `${computed.length ? (completedStops.length / computed.length) * 100 : 0}%`;
 
-  // Snapshot Map + In-Map Day Switcher + Chunked Multi-Stop Google Maps Legs
+  // Snapshot Map + In-Map Day Switcher + Top-Left Mileage HUD + Chunked Multi-Stop Google Maps Legs
   const mapDaySwitcher = document.getElementById("map-day-switcher");
   if (mapDaySwitcher) {
     if (days.length <= 1) {
@@ -1504,10 +1574,21 @@ function render() {
       mapDaySwitcher.classList.remove("hidden");
       mapDaySwitcher.innerHTML = days
         .map((d) => {
-          const cnt = getDayHouses(d.id).length;
-          return `<button class="map-day-pill ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">🎄 ${escapeHtml(d.label)} (${cnt})</button>`;
+          const dHouses = getDayHouses(d.id);
+          const dMiles = calculateSchedule(d, dHouses).totalMiles;
+          return `<button class="map-day-pill ${d.id === activeDayId ? "active" : ""}" onclick="switchDay('${d.id}')">🎄 ${escapeHtml(d.label)} • ${dHouses.length} • ${dMiles.toFixed(1)} mi</button>`;
         })
         .join("");
+    }
+  }
+  const mapStatsHud = document.getElementById("map-stats-hud");
+  if (mapStatsHud) {
+    if (!computed.length) {
+      mapStatsHud.classList.add("hidden");
+      mapStatsHud.textContent = "";
+    } else {
+      mapStatsHud.classList.remove("hidden");
+      mapStatsHud.textContent = `🚗 ${totalMiles.toFixed(1)} mi • ${totalTravelMins}m`;
     }
   }
   document.getElementById("snapshot-miles-label").textContent = `• ${totalMiles.toFixed(1)} mi • ${computed.length} stops`;
