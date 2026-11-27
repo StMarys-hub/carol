@@ -595,40 +595,48 @@ body.light-theme .map-stats-hud {
 .route-svg-viewport:active {
   cursor: grabbing;
 }
-.map-zoom-controls {
+.map-controls-top,
+.map-controls-bottom {
   position: absolute;
-  top: 8px;
   right: 8px;
   z-index: 4;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  padding: 4px;
-  border-radius: 12px;
-  background: rgba(6, 24, 18, 0.72);
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 3px;
+  border-radius: 10px;
+  background: rgba(6, 24, 18, 0.76);
   backdrop-filter: blur(8px);
   -webkit-backdrop-filter: blur(8px);
   border: 1px solid rgba(255, 255, 255, 0.12);
-  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.32);
 }
-body.light-theme .map-zoom-controls {
-  background: rgba(255, 255, 255, 0.85);
+.map-controls-top {
+  top: 8px;
+}
+.map-controls-bottom {
+  bottom: 8px;
+}
+body.light-theme .map-controls-top,
+body.light-theme .map-controls-bottom {
+  background: rgba(255, 255, 255, 0.88);
   border-color: rgba(15, 23, 42, 0.14);
-  box-shadow: 0 4px 12px rgba(15, 23, 42, 0.12);
+  box-shadow: 0 3px 10px rgba(15, 23, 42, 0.12);
 }
-.map-zoom-divider {
-  height: 1px;
-  margin: 2px 3px;
+.map-zoom-vdiv {
+  width: 1px;
+  height: 18px;
+  margin: 0 2px;
   background: var(--border-subtle);
 }
 .map-zoom-btn {
-  width: 32px;
-  height: 32px;
-  border-radius: 8px;
+  width: 28px;
+  height: 28px;
+  border-radius: 7px;
   background: var(--bg-surface-elevated);
   color: var(--text-primary);
-  border: 1.5px solid var(--border-strong);
-  font-size: 0.92rem;
+  border: 1px solid var(--border-strong);
+  font-size: 0.86rem;
   font-weight: 900;
   cursor: pointer;
   display: grid;
@@ -636,16 +644,25 @@ body.light-theme .map-zoom-controls {
   padding: 0;
 }
 .map-zoom-btn.add-btn {
+  width: auto;
+  padding: 0 7px;
   background: rgba(16, 185, 129, 0.22);
   border-color: var(--accent-mint);
   color: var(--accent-mint);
   font-size: 0.72rem;
-  letter-spacing: -0.04em;
+  letter-spacing: -0.02em;
 }
 body.light-theme .map-zoom-btn.add-btn {
   background: #D1FAE5;
   color: #065F46;
   border-color: #059669;
+}
+.map-pin-vdiv {
+  width: 1px;
+  height: 22px;
+  margin: 0 2px;
+  background: var(--border-strong);
+  flex-shrink: 0;
 }
 .route-svg-wrap.fullscreen {
   position: fixed;

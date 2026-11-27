@@ -777,11 +777,11 @@ function selectMapPin(stopId) {
   const navUrl = getNavUrl(stop.address, stop.lat, stop.lng);
   const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
   const days = getDays();
-  const moveHtml =
-    isAdmin && days.length > 1
+  const moveHtml = isAdmin
+    ? days.length > 1
       ? `
         <div class="map-pin-move">
-          <label for="map-pin-day-select">📅 Assign Day:</label>
+          <label for="map-pin-day-select">📅 Day:</label>
           <select id="map-pin-day-select" aria-label="Reassign house to another Carol Day">
             ${days
               .map(
@@ -790,10 +790,18 @@ function selectMapPin(stopId) {
               )
               .join("")}
           </select>
-          <button id="btn-map-pin-move" class="mini-btn gold" onclick="moveMapPinHouseToDay('${stop.id}')">💾 Save Day</button>
+          <button id="btn-map-pin-move" class="mini-btn gold" onclick="moveMapPinHouseToDay('${stop.id}')">💾 Save</button>
+          <span class="map-pin-vdiv" aria-hidden="true"></span>
+          <button id="btn-map-pin-delete" class="mini-btn danger" onclick="deleteMapPinHouse('${stop.id}')" title="Delete House from Schedule" aria-label="Delete House">🗑️</button>
         </div>
       `
-      : "";
+      : `
+        <div class="map-pin-move" style="justify-content: space-between;">
+          <span style="font-size:0.75rem;font-weight:800;color:var(--text-muted);">🔐 Admin Action</span>
+          <button id="btn-map-pin-delete" class="mini-btn danger" onclick="deleteMapPinHouse('${stop.id}')">🗑️ Delete House</button>
+        </div>
+      `
+    : "";
 
   bar.innerHTML = `
     <div class="map-pin-top">
@@ -893,8 +901,60 @@ async function moveMapPinHouseToDay(houseId) {
   } finally {
     if (btn) {
       btn.disabled = false;
-      btn.textContent = "💾 Save Day";
+      btn.textContent = "💾 Save";
     }
+  }
+}
+
+async function deleteMapPinHouse(houseId) {
+  if (!adminSession.unlocked || adminSession.wardId !== activeWardId || !sbClient || !wardPayload?.active_season) {
+    return showToast("Unlock 🔐 Admin first to delete houses");
+  }
+  const existing = (wardPayload.ward_houses || []).find((x) => x.id === houseId);
+  if (!existing) return;
+  const dayObj = getDays().find((d) => d.id === existing.carol_day_id);
+  const dayLabel = dayObj ? dayObj.label : "this day";
+
+  if (!window.confirm(`Delete "${existing.family_name}" (${existing.address}) from ${dayLabel}?\n\nThis updates all phones and cannot be undone.`)) {
+    return;
+  }
+
+  const btn = document.getElementById("btn-map-pin-delete");
+  if (btn) btn.disabled = true;
+
+  try {
+    const remaining = window.CarolOptimizer.recomputeLegEstimates(
+      getDayHouses(existing.carol_day_id).filter((h) => h.id !== houseId),
+      "afternoon"
+    );
+    if (remaining.length >= 2) {
+      await window.CarolOptimizer.refreshRouteLegsWithTraffic(remaining, "afternoon");
+    }
+
+    const { data, error } = await sbClient.rpc("admin_bulk_save_houses", {
+      p_ward_id: activeWardId,
+      p_admin_code: adminSession.code,
+      p_season_id: wardPayload.active_season.id,
+      p_carol_day_id: existing.carol_day_id,
+      p_houses: remaining,
+      p_replace_day: true
+    });
+
+    if (!error && data && data.ok) {
+      const pinBar = document.getElementById("map-pin-bar");
+      if (pinBar) pinBar.classList.remove("visible");
+      refreshedDayRoadLegs.add(existing.carol_day_id);
+      await syncActiveWardOnline(true);
+      broadcastPiiFreeEtaShift(existing.carol_day_id, 0, new Date().toISOString());
+      populateAdminControls();
+      showToast(`🗑️ Deleted ${existing.family_name} from ${dayLabel} & synced for all`);
+    } else {
+      showToast(`Delete failed: ${(data && data.error) || (error && error.message) || "Error"}`);
+    }
+  } catch (e) {
+    showToast("Delete failed — check internet connection.");
+  } finally {
+    if (btn) btn.disabled = false;
   }
 }
 
@@ -913,6 +973,8 @@ function rerenderRouteMapOnly() {
   mapPanX = Math.max(-maxPanX, Math.min(maxPanX, mapPanX));
   mapPanY = Math.max(-maxPanY, Math.min(maxPanY, mapPanY));
   el.style.transform = "";
+  const resetBtn = document.getElementById("btn-map-reset");
+  if (resetBtn) resetBtn.style.display = mapZoom > 1 ? "grid" : "none";
   el.innerHTML = renderOfflineRouteSvg(lastMapRenderArgs.computed, lastMapRenderArgs.nextIndex);
 }
 

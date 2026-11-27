@@ -1,12 +1,12 @@
-const CACHE_NAME = "stmarys-carol-multiward-v36";
+const CACHE_NAME = "stmarys-carol-multiward-v37";
 const PRECACHE_ASSETS = [
   "./",
   "./index.html",
-  "./styles.css?v=36",
-  "./supabase-config.js?v=36",
-  "./optimizer.js?v=36",
-  "./songbook.js?v=36",
-  "./app.js?v=36",
+  "./styles.css?v=37",
+  "./supabase-config.js?v=37",
+  "./optimizer.js?v=37",
+  "./songbook.js?v=37",
+  "./app.js?v=37",
   "./manifest.webmanifest",
   "./icons/icon.svg",
   "./icons/icon-192.png",
