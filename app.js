@@ -2204,7 +2204,39 @@ function copyFullDaySchedule() {
   copyText(txt, "📋 Full day schedule copied to clipboard!");
 }
 
-function printDayBackup() {
+function openPrintOptionsModal() {
+  const activeDay = getDays().find((d) => d.id === activeDayId);
+  if (!activeDay) return showToast("No carol day selected");
+  if (!getDayHouses(activeDay.id).length) return showToast("No houses scheduled for this day");
+  document.getElementById("print-options-modal").classList.add("open");
+}
+
+function buildPrintHeaderHtml(w, activeDay, seasonName, gatherStr, finalStop, count, defaultVisitMins, totalTravelMins, totalMiles, subtitlePrefix, coordLine) {
+  return `
+    <div class="pb-header">
+      <div class="pb-brand">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#F5C542" />
+          <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
+          <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
+          <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
+        </svg>
+        <div>
+          <div class="pb-title">${escapeHtml(w.full)} • ${escapeHtml(activeDay.label)}</div>
+          <div class="pb-sub">${subtitlePrefix ? `${subtitlePrefix} • ` : ""}${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
+        </div>
+      </div>
+      <div class="pb-meta">
+        <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
+        <div><strong>${count} stops</strong> • <strong>${defaultVisitMins}m/house</strong> • <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+        ${coordLine || ""}
+      </div>
+    </div>
+  `;
+}
+
+function printDayBackup(mode = "schedule") {
+  closeModal("print-options-modal");
   const activeDay = getDays().find((d) => d.id === activeDayId);
   if (!activeDay) return showToast("No carol day selected");
   const houses = getDayHouses(activeDay.id);
@@ -2217,13 +2249,14 @@ function printDayBackup() {
   const w = CFG.WARDS[activeWardId];
   const seasonName = (wardPayload && wardPayload.active_season && wardPayload.active_season.name) || "Christmas Carol";
   const settings = (wardPayload && wardPayload.ward_settings) || {};
+  const defaultVisitMins = Number(activeDay.avg_visit_mins) || Number(settings.default_visit_mins) || 20;
   const gatherStr = minutesToTimeStr(timeStrToMinutes(activeDay.start_time));
   const coordLine =
     settings.coordinator_name || settings.coordinator_phone
       ? `<div>Coordinator: <strong>${escapeHtml(settings.coordinator_name || "Ward Coordinator")}</strong>${settings.coordinator_phone ? ` • ${escapeHtml(settings.coordinator_phone)}` : ""}</div>`
       : "";
-  const defaultVisitMins = Number(activeDay.avg_visit_mins) || Number(settings.default_visit_mins) || 20;
   const finalStop = computed[computed.length - 1];
+  const currentIdx = computed.findIndex((s) => !s.visited);
   const printedAt = new Date().toLocaleString([], {
     month: "short",
     day: "numeric",
@@ -2267,124 +2300,81 @@ function printDayBackup() {
     })
     .join("");
 
-  sheet.innerHTML = `
-    <div class="pb-header">
-      <div class="pb-brand">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#F5C542" />
-          <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
-          <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
-          <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
-        </svg>
-        <div>
-          <div class="pb-title">${escapeHtml(w.full)} — ${escapeHtml(activeDay.label)}</div>
-          <div class="pb-sub">${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
-        </div>
+  const schedulePageHtml = `
+    <div>
+      ${buildPrintHeaderHtml(w, activeDay, seasonName, gatherStr, finalStop, computed.length, defaultVisitMins, totalTravelMins, totalMiles, "📋 Schedule", coordLine)}
+      <table class="pb-table">
+        <thead>
+          <tr>
+            <th>#</th>
+            <th>ETA Window</th>
+            <th>Family &amp; Notes</th>
+            <th>Address</th>
+            <th>Drive</th>
+            <th style="text-align:center;">✓</th>
+          </tr>
+        </thead>
+        <tbody>${rowsHtml}</tbody>
+      </table>
+      <div class="pb-footer">
+        <span>Printed ${escapeHtml(printedAt)}</span>
+        <span>${mode === "both" ? "Page 1 of 2 • Schedule" : "St. Mary's Christmas Carol Backup Sheet • Live ETAs sync in app"}</span>
       </div>
-      <div class="pb-meta">
-        <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
-        <div><strong>${computed.length} stops</strong> • <strong>${defaultVisitMins}m/house</strong> • <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
-        ${coordLine}
-      </div>
-    </div>
-    <table class="pb-table">
-      <thead>
-        <tr>
-          <th>#</th>
-          <th>ETA Window</th>
-          <th>Family &amp; Notes</th>
-          <th>Address</th>
-          <th>Drive</th>
-          <th style="text-align:center;">✓</th>
-        </tr>
-      </thead>
-      <tbody>${rowsHtml}</tbody>
-    </table>
-    <div class="pb-footer">
-      <span>Printed ${escapeHtml(printedAt)}</span>
-      <span>St. Mary's Christmas Carol Backup Sheet • Live ETAs sync automatically in app</span>
     </div>
   `;
 
-  window.print();
+  const mapHeight = mode === "both" ? 560 : 455;
+  const mapSvgHtml = renderOfflineRouteSvg(computed, currentIdx, { width: 740, height: mapHeight });
+  const stopKeyHtml =
+    mode === "map"
+      ? `<div class="pb-stop-key">${computed
+          .map((s) => {
+            const miMatch = String(s.distance_label || "").match(/(\d+(?:\.\d+)?\s*mi\b)/i);
+            const leg = s.index === 0 ? "Start" : miMatch ? miMatch[1] : `${s.driveFromPrev}m`;
+            return `
+              <div class="pb-stop-key-item">
+                <span><strong class="pb-num">#${s.index + 1}</strong> <span class="pb-fam">${escapeHtml(s.family_name)}</span></span>
+                <span class="pb-note">${s.arrivalFormatted} • ${escapeHtml(leg)}</span>
+              </div>
+            `;
+          })
+          .join("")}</div>`
+      : "";
+
+  const mapPageHtml = `
+    <div class="${mode === "both" ? "pb-page-break" : ""}">
+      ${buildPrintHeaderHtml(w, activeDay, seasonName, gatherStr, finalStop, computed.length, defaultVisitMins, totalTravelMins, totalMiles, "🗺️ Route Map", "")}
+      <div class="pb-map-frame">
+        ${mapSvgHtml}
+        <div class="pb-map-legend">
+          <span>🟢 Done</span>
+          <span>🟡 Next Stop</span>
+          <span>🔴 Final Stop</span>
+          <span>🟠 ≥ 3.0 mi leg</span>
+          <span>◌ Other Carol Days</span>
+        </div>
+      </div>
+      ${stopKeyHtml}
+      <div class="pb-footer">
+        <span>Printed ${escapeHtml(printedAt)}</span>
+        <span>${mode === "both" ? "Page 2 of 2 • Route Map (Names & Leg Distances)" : "St. Mary's Christmas Carol Route Map • Names & Leg Distances Included"}</span>
+      </div>
+    </div>
+  `;
+
+  if (mode === "both") {
+    sheet.innerHTML = schedulePageHtml + mapPageHtml;
+  } else if (mode === "map") {
+    sheet.innerHTML = mapPageHtml;
+  } else {
+    sheet.innerHTML = schedulePageHtml;
+  }
+
+  setTimeout(() => window.print(), 60);
 }
 
 function printRouteMapBackup() {
-  const activeDay = getDays().find((d) => d.id === activeDayId);
-  if (!activeDay) return showToast("No carol day selected");
-  const houses = getDayHouses(activeDay.id);
-  const { computed, totalTravelMins, totalMiles } = calculateSchedule(activeDay, houses);
-  if (!computed.length) return showToast("No houses scheduled for this day");
-
-  const sheet = document.getElementById("print-backup-sheet");
-  if (!sheet) return window.print();
-
-  const w = CFG.WARDS[activeWardId];
-  const seasonName = (wardPayload && wardPayload.active_season && wardPayload.active_season.name) || "Christmas Carol";
-  const settings = (wardPayload && wardPayload.ward_settings) || {};
-  const defaultVisitMins = Number(activeDay.avg_visit_mins) || Number(settings.default_visit_mins) || 20;
-  const gatherStr = minutesToTimeStr(timeStrToMinutes(activeDay.start_time));
-  const finalStop = computed[computed.length - 1];
-  const currentIdx = computed.findIndex((s) => !s.visited);
-  const printedAt = new Date().toLocaleString([], {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit"
-  });
-
-  const mapSvgHtml = renderOfflineRouteSvg(computed, currentIdx, { width: 740, height: 455 });
-  const stopKeyHtml = computed
-    .map((s) => {
-      const miMatch = String(s.distance_label || "").match(/(\d+(?:\.\d+)?\s*mi\b)/i);
-      const leg = s.index === 0 ? "Start" : miMatch ? miMatch[1] : `${s.driveFromPrev}m`;
-      return `
-        <div class="pb-stop-key-item">
-          <span><strong class="pb-num">#${s.index + 1}</strong> <span class="pb-fam">${escapeHtml(s.family_name)}</span></span>
-          <span class="pb-note">${s.arrivalFormatted} • ${escapeHtml(leg)}</span>
-        </div>
-      `;
-    })
-    .join("");
-
-  sheet.innerHTML = `
-    <div class="pb-header">
-      <div class="pb-brand">
-        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-          <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#F5C542" />
-          <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
-          <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
-          <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
-        </svg>
-        <div>
-          <div class="pb-title">${escapeHtml(w.full)} • ${escapeHtml(activeDay.label)}</div>
-          <div class="pb-sub">🗺️ Route Map • ${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
-        </div>
-      </div>
-      <div class="pb-meta">
-        <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
-        <div><strong>${computed.length} stops</strong> • <strong>${defaultVisitMins}m/house</strong> • <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
-      </div>
-    </div>
-    <div class="pb-map-frame">
-      ${mapSvgHtml}
-      <div class="pb-map-legend">
-        <span>🟢 Done</span>
-        <span>🟡 Next Stop</span>
-        <span>🔴 Final Stop</span>
-        <span>🟠 ≥ 3.0 mi leg</span>
-        <span>◌ Other Carol Days</span>
-      </div>
-    </div>
-    <div class="pb-stop-key">${stopKeyHtml}</div>
-    <div class="pb-footer">
-      <span>Printed ${escapeHtml(printedAt)}</span>
-      <span>St. Mary's Christmas Carol Route Map • Names &amp; Leg Distances Included</span>
-    </div>
-  `;
-
-  window.print();
+  printDayBackup("map");
 }
 
 function openQuickHelpModal() {

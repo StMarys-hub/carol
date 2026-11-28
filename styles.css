@@ -2050,6 +2050,10 @@ textarea {
   html.light-theme .pb-stop-key-item {
     border-bottom-color: #E2E8F0;
   }
+  .pb-page-break {
+    page-break-before: always;
+    break-before: page;
+  }
 }
 
 .toast {

@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=47" />
+  <link rel="stylesheet" href="./styles.css?v=48" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -290,7 +290,7 @@
               <div id="map-stats-hud" class="map-stats-hud" aria-live="polite"></div>
               <div class="map-controls-top" aria-label="Map actions">
                 <button id="btn-map-add-house" class="map-zoom-btn add-btn" onclick="openAddHouseModal(true)" title="Add House to Map" aria-label="Add House to Map">＋🏠</button>
-                <button id="btn-map-print" class="map-zoom-btn" onclick="printRouteMapBackup()" title="Print Route Map with Names &amp; Distances" aria-label="Print Route Map">🖨️</button>
+                <button id="btn-map-print" class="map-zoom-btn" onclick="openPrintOptionsModal()" title="Print Schedule / Route Map" aria-label="Print Options">🖨️</button>
                 <button id="btn-map-fullscreen" class="map-zoom-btn" onclick="toggleMapFullscreen()" title="Full Screen Map" aria-label="Full Screen Map">⛶</button>
               </div>
               <div class="map-controls-bottom" aria-label="Map zoom and layers">
@@ -356,7 +356,7 @@
           <a id="footer-sms-btn" class="footer-chip" href="#" style="display: none;">💬 Text Coordinator</a>
           <button id="btn-gps" class="footer-chip" onclick="toggleGpsTracking()">📍 Near Me</button>
           <button class="footer-chip" onclick="copyFullDaySchedule()">📋 Copy Schedule</button>
-          <button class="footer-chip" onclick="printDayBackup()">🖨️ Print Backup</button>
+          <button class="footer-chip" onclick="openPrintOptionsModal()">🖨️ Print Backup</button>
           <button class="footer-chip" onclick="openQuickHelpModal()">❓ Help</button>
           <button class="footer-chip" onclick="openSettingsModal()">⚙️ Settings &amp; Admin</button>
           <button class="footer-chip" onclick="lockCurrentWard()">🔒 Lock Ward</button>
@@ -893,14 +893,32 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
     </div>
   </div>
 
+  <!-- Print Backup Options Modal -->
+  <div id="print-options-modal" class="modal-backdrop" onclick="closeOnBackdrop(event, 'print-options-modal')">
+    <div class="modal-sheet" role="dialog" aria-modal="true" style="max-width: 440px;">
+      <div class="modal-header">
+        <h2>🖨️ Print / Save PDF Backup</h2>
+        <button class="close-btn" onclick="closeModal('print-options-modal')">✕ Close</button>
+      </div>
+      <p class="helper-text" style="margin-bottom: 12px; font-size: 0.85rem;">
+        Uses your active theme (<strong>Midnight Nativity</strong> or <strong>Snow Day</strong>) in compact order <strong>#1 → #N</strong>.
+      </p>
+      <div style="display: flex; flex-direction: column; gap: 9px;">
+        <button class="btn-full btn-gold" onclick="printDayBackup('both')">📋 + 🗺️ Schedule &amp; Route Map (2 Pages)</button>
+        <button class="btn-full btn-save" onclick="printDayBackup('schedule')">📋 Schedule Only (1 Page)</button>
+        <button class="btn-full btn-secondary" onclick="printDayBackup('map')">🗺️ Route Map Only (Names &amp; Distances)</button>
+      </div>
+    </div>
+  </div>
+
   <!-- Dedicated Compact Print Backup Sheet (Hidden on Screen, Rendered #1..#N on Print) -->
   <div id="print-backup-sheet" class="print-backup-sheet" aria-hidden="true"></div>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=47" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=47" charset="UTF-8"></script>
-  <script src="./songbook.js?v=47" charset="UTF-8"></script>
-  <script src="./app.js?v=47" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=48" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=48" charset="UTF-8"></script>
+  <script src="./songbook.js?v=48" charset="UTF-8"></script>
+  <script src="./app.js?v=48" charset="UTF-8"></script>
 </body>
 </html>
