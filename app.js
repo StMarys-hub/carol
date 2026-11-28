@@ -1612,8 +1612,11 @@ function renderOfflineRouteSvg(computed, nextIndex, printOpts = null) {
     `;
   }
 
-  const svgDefs = `<defs><filter id="pinShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="1.4" stdDeviation="1.6" flood-color="#000000" flood-opacity="0.38" /></filter></defs>`;
-  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${svgDefs}${gridSvg}${otherDaysSvg}${activeLinesSvg}${legBadgesSvg}<g filter="url(#pinShadow)">${activePinsSvg}</g>${labelsSvg}${userDotSvg}${compassSvg}</svg>`;
+  const svgDefs = isPrint
+    ? ""
+    : `<defs><filter id="pinShadow" x="-30%" y="-30%" width="160%" height="160%"><feDropShadow dx="0" dy="1.4" stdDeviation="1.6" flood-color="#000000" flood-opacity="0.38" /></filter></defs>`;
+  const pinsLayer = isPrint ? `<g>${activePinsSvg}</g>` : `<g filter="url(#pinShadow)">${activePinsSvg}</g>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" style="display:block;width:100%;height:${!isPrint && mapFullscreen ? "100%" : "auto"};" role="img" aria-label="Multi-day offline route map">${svgDefs}${gridSvg}${otherDaysSvg}${activeLinesSvg}${legBadgesSvg}${pinsLayer}${labelsSvg}${userDotSvg}${compassSvg}</svg>`;
 }
 
 // ---------- 20-Min House Countdown Timer ----------
@@ -1835,7 +1838,7 @@ function render() {
 
   const mapAddBtn = document.getElementById("btn-map-add-house");
   if (mapAddBtn) {
-    mapAddBtn.style.display = adminSession.unlocked && adminSession.wardId === activeWardId ? "grid" : "none";
+    mapAddBtn.style.display = "grid";
   }
 
   // Snapshot Map + In-Map Day Switcher (2-line cards) + Fallback Single-Day HUD + Chunked Multi-Stop Google Maps Legs
