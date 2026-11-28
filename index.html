@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=44" />
+  <link rel="stylesheet" href="./styles.css?v=45" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -290,6 +290,7 @@
               <div id="map-stats-hud" class="map-stats-hud" aria-live="polite"></div>
               <div class="map-controls-top" aria-label="Map actions">
                 <button id="btn-map-add-house" class="map-zoom-btn add-btn" onclick="openAddHouseModal(true)" title="Add House to Map" aria-label="Add House to Map">＋🏠</button>
+                <button id="btn-map-print" class="map-zoom-btn" onclick="printRouteMapBackup()" title="Print Route Map with Names &amp; Distances" aria-label="Print Route Map">🖨️</button>
                 <button id="btn-map-fullscreen" class="map-zoom-btn" onclick="toggleMapFullscreen()" title="Full Screen Map" aria-label="Full Screen Map">⛶</button>
               </div>
               <div class="map-controls-bottom" aria-label="Map zoom and layers">
@@ -897,9 +898,9 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=44" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=44" charset="UTF-8"></script>
-  <script src="./songbook.js?v=44" charset="UTF-8"></script>
-  <script src="./app.js?v=44" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=45" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=45" charset="UTF-8"></script>
+  <script src="./songbook.js?v=45" charset="UTF-8"></script>
+  <script src="./app.js?v=45" charset="UTF-8"></script>
 </body>
 </html>

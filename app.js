@@ -1240,8 +1240,14 @@ function initRouteMapPanHandlers() {
   );
 }
 
-function renderOfflineRouteSvg(computed, nextIndex) {
-  lastMapRenderArgs = { computed, nextIndex };
+function renderOfflineRouteSvg(computed, nextIndex, printOpts = null) {
+  const isPrint = !!printOpts;
+  if (!isPrint) lastMapRenderArgs = { computed, nextIndex };
+  const zoomVal = isPrint ? 1 : mapZoom;
+  const panXVal = isPrint ? 0 : mapPanX;
+  const panYVal = isPrint ? 0 : mapPanY;
+  const showLabelsVal = isPrint ? true : mapShowLabels;
+  const showMilesVal = isPrint ? true : mapShowMiles;
   const days = getDays();
   const otherDayGroups = days
     .filter((d) => d.id !== activeDayId)
@@ -1273,13 +1279,15 @@ function renderOfflineRouteSvg(computed, nextIndex) {
 
   // Measure real viewport dimensions so Full Screen & mobile use 100% of canvas with ZERO aspect-ratio distortion
   const vpEl = document.getElementById("route-svg-viewport");
-  const measuredW = vpEl && vpEl.clientWidth > 120 ? vpEl.clientWidth : 380;
-  const measuredH = mapFullscreen
+  const measuredW = isPrint ? (printOpts.width || 740) : (vpEl && vpEl.clientWidth > 120 ? vpEl.clientWidth : 380);
+  const measuredH = isPrint
+    ? (printOpts.height || 460)
+    : mapFullscreen
     ? Math.max(320, (vpEl && vpEl.clientHeight > 180 ? vpEl.clientHeight : window.innerHeight - 110))
     : Math.max(230, Math.min(300, Math.round(measuredW * 0.62)));
   const W = measuredW;
   const H = measuredH;
-  const pad = 28;
+  const pad = isPrint ? 36 : 28;
 
   const spanLng = Math.max((maxLng - minLng) * cosLat, 0.005);
   const spanLat = Math.max(maxLat - minLat, 0.005);
@@ -1293,8 +1301,8 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     const bx = offX + (lng - minLng) * cosLat * baseScale;
     const by = H - (offY + (lat - minLat) * baseScale);
     return {
-      x: W / 2 + (bx - W / 2) * mapZoom + mapPanX,
-      y: H / 2 + (by - H / 2) * mapZoom + mapPanY
+      x: W / 2 + (bx - W / 2) * zoomVal + panXVal,
+      y: H / 2 + (by - H / 2) * zoomVal + panYVal
     };
   };
 
@@ -1405,10 +1413,12 @@ function renderOfflineRouteSvg(computed, nextIndex) {
   let activeLinesSvg = "";
   let legBadgesSvg = "";
   const placedBoxes = []; // Track placed label & distance pill boxes for collision avoidance
-  const ctrlAvoidBoxes = [
-    { x1: W - 92, y1: 0, x2: W, y2: 44 },        // Top-right [＋🏠][⛶]
-    { x1: W - 168, y1: H - 44, x2: W, y2: H }    // Bottom-right [mi][Aa]|[－][＋]
-  ];
+  const ctrlAvoidBoxes = isPrint
+    ? []
+    : [
+        { x1: W - 122, y1: 0, x2: W, y2: 44 },      // Top-right [＋🏠][🖨️][⛶]
+        { x1: W - 168, y1: H - 44, x2: W, y2: H }   // Bottom-right [mi][Aa]|[－][＋]
+      ];
 
   function boxesOverlap(a, b) {
     return a.x1 < b.x2 && a.x2 > b.x1 && a.y1 < b.y2 && a.y2 > b.y1;
@@ -1453,8 +1463,9 @@ function renderOfflineRouteSvg(computed, nextIndex) {
       activeLinesSvg += `<polygon points="4.2,0 -2.6,-2.9 -1.2,0 -2.6,2.9" fill="${stroke}" opacity="0.92" transform="translate(${ax.toFixed(1)},${ay.toFixed(1)}) rotate(${ang.toFixed(1)})" />`;
     }
 
-    // Smart collision-safe per-leg distance pill on segments long enough (>= 42px)
-    if (mapShowMiles && segLen >= 42 && (isWalk || typeof legMiles === "number")) {
+    // Smart collision-safe per-leg distance pill on segments long enough
+    const minSegForMiles = isPrint ? 34 : 42;
+    if (showMilesVal && segLen >= minSegForMiles && (isWalk || typeof legMiles === "number")) {
       const mx = (p1.x + p2.x) / 2;
       const my = (p1.y + p2.y) / 2;
       if (mx > 20 && mx < W - 18 && my > 16 && my < H - 14) {
@@ -1531,7 +1542,7 @@ function renderOfflineRouteSvg(computed, nextIndex) {
     `;
 
     // Smart 8-Position Collision-Avoiding Label Placement
-    if (mapShowLabels && p.x > -30 && p.x < W + 30 && p.y > -20 && p.y < H + 20) {
+    if (showLabelsVal && p.x > -30 && p.x < W + 30 && p.y > -20 && p.y < H + 20) {
       const shortLabel = (s.family_name || "").replace(/\s+and\s+/i, " & ").trim();
       const lw = Math.min(130, Math.max(36, shortLabel.length * 5.2 + 8));
       const lh = 14;
@@ -2208,6 +2219,7 @@ function printDayBackup() {
     settings.coordinator_name || settings.coordinator_phone
       ? `<div>Coordinator: <strong>${escapeHtml(settings.coordinator_name || "Ward Coordinator")}</strong>${settings.coordinator_phone ? ` • ${escapeHtml(settings.coordinator_phone)}` : ""}</div>`
       : "";
+  const defaultVisitMins = Number(activeDay.avg_visit_mins) || Number(settings.default_visit_mins) || 20;
   const finalStop = computed[computed.length - 1];
   const printedAt = new Date().toLocaleString([], {
     month: "short",
@@ -2239,7 +2251,7 @@ function printDayBackup() {
       return `
         <tr>
           <td class="pb-num">#${s.index + 1}</td>
-          <td class="pb-time">${s.arrivalFormatted} – ${s.departureFormatted}</td>
+          <td class="pb-time">${s.arrivalFormatted} – ${s.departureFormatted}<div class="pb-note">${s.duration}m visit</div></td>
           <td>
             <div class="pb-fam">${escapeHtml(s.family_name)}${roleTag}</div>
             ${noteHtml}
@@ -2268,7 +2280,7 @@ function printDayBackup() {
       </div>
       <div class="pb-meta">
         <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
-        <div>Stops: <strong>${computed.length}</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+        <div>Stops: <strong>${computed.length}</strong> • Visit: <strong>${defaultVisitMins}m/house</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
         ${coordLine}
       </div>
     </div>
@@ -2288,6 +2300,84 @@ function printDayBackup() {
     <div class="pb-footer">
       <span>Printed ${escapeHtml(printedAt)}</span>
       <span>St. Mary's Christmas Carol Backup Sheet • Live ETAs sync automatically in app</span>
+    </div>
+  `;
+
+  window.print();
+}
+
+function printRouteMapBackup() {
+  const activeDay = getDays().find((d) => d.id === activeDayId);
+  if (!activeDay) return showToast("No carol day selected");
+  const houses = getDayHouses(activeDay.id);
+  const { computed, totalTravelMins, totalMiles } = calculateSchedule(activeDay, houses);
+  if (!computed.length) return showToast("No houses scheduled for this day");
+
+  const sheet = document.getElementById("print-backup-sheet");
+  if (!sheet) return window.print();
+
+  const w = CFG.WARDS[activeWardId];
+  const seasonName = (wardPayload && wardPayload.active_season && wardPayload.active_season.name) || "Christmas Carol";
+  const settings = (wardPayload && wardPayload.ward_settings) || {};
+  const defaultVisitMins = Number(activeDay.avg_visit_mins) || Number(settings.default_visit_mins) || 20;
+  const gatherStr = minutesToTimeStr(timeStrToMinutes(activeDay.start_time));
+  const finalStop = computed[computed.length - 1];
+  const currentIdx = computed.findIndex((s) => !s.visited);
+  const printedAt = new Date().toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+
+  const mapSvgHtml = renderOfflineRouteSvg(computed, currentIdx, { width: 740, height: 455 });
+  const stopKeyHtml = computed
+    .map((s) => {
+      const miMatch = String(s.distance_label || "").match(/(\d+(?:\.\d+)?\s*mi\b)/i);
+      const leg = s.index === 0 ? "Start" : miMatch ? miMatch[1] : `${s.driveFromPrev}m`;
+      return `
+        <div class="pb-stop-key-item">
+          <span><strong class="pb-num">#${s.index + 1}</strong> <span class="pb-fam">${escapeHtml(s.family_name)}</span></span>
+          <span class="pb-note">${s.arrivalFormatted} • ${escapeHtml(leg)}</span>
+        </div>
+      `;
+    })
+    .join("");
+
+  sheet.innerHTML = `
+    <div class="pb-header">
+      <div class="pb-brand">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#F5C542" />
+          <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
+          <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
+          <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
+        </svg>
+        <div>
+          <div class="pb-title">🗺️ Route Map — ${escapeHtml(w.full)} (${escapeHtml(activeDay.label)})</div>
+          <div class="pb-sub">${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
+        </div>
+      </div>
+      <div class="pb-meta">
+        <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
+        <div>Stops: <strong>${computed.length}</strong> • Visit: <strong>${defaultVisitMins}m/house</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+      </div>
+    </div>
+    <div class="pb-map-frame">
+      ${mapSvgHtml}
+      <div class="pb-map-legend">
+        <span>🟢 Done</span>
+        <span>🟡 Next Stop</span>
+        <span>🔴 Final Stop</span>
+        <span>🟠 ≥ 3.0 mi leg</span>
+        <span>◌ Other Carol Days</span>
+      </div>
+    </div>
+    <div class="pb-stop-key">${stopKeyHtml}</div>
+    <div class="pb-footer">
+      <span>Printed ${escapeHtml(printedAt)}</span>
+      <span>St. Mary's Christmas Carol Route Map • Names &amp; Leg Distances Included</span>
     </div>
   `;
 
