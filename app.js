@@ -2190,6 +2190,110 @@ function copyFullDaySchedule() {
   copyText(txt, "📋 Full day schedule copied to clipboard!");
 }
 
+function printDayBackup() {
+  const activeDay = getDays().find((d) => d.id === activeDayId);
+  if (!activeDay) return showToast("No carol day selected");
+  const houses = getDayHouses(activeDay.id);
+  const { computed, totalTravelMins, totalMiles } = calculateSchedule(activeDay, houses);
+  if (!computed.length) return showToast("No houses scheduled for this day");
+
+  const sheet = document.getElementById("print-backup-sheet");
+  if (!sheet) return window.print();
+
+  const w = CFG.WARDS[activeWardId];
+  const seasonName = (wardPayload && wardPayload.active_season && wardPayload.active_season.name) || "Christmas Carol";
+  const settings = (wardPayload && wardPayload.ward_settings) || {};
+  const gatherStr = minutesToTimeStr(timeStrToMinutes(activeDay.start_time));
+  const coordLine =
+    settings.coordinator_name || settings.coordinator_phone
+      ? `<div>Coordinator: <strong>${escapeHtml(settings.coordinator_name || "Ward Coordinator")}</strong>${settings.coordinator_phone ? ` • ${escapeHtml(settings.coordinator_phone)}` : ""}</div>`
+      : "";
+  const finalStop = computed[computed.length - 1];
+  const printedAt = new Date().toLocaleString([], {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit"
+  });
+
+  const rowsHtml = computed
+    .map((s) => {
+      const roleTag =
+        s.stop_role === "START"
+          ? `<span class="pb-role start">START</span>`
+          : s.stop_role === "END"
+          ? `<span class="pb-role end">🍽️ END</span>`
+          : "";
+      const noteParts = [];
+      if (s.phone) noteParts.push(`📞 ${s.phone}`);
+      if (s.notes) noteParts.push(s.notes);
+      const noteHtml = noteParts.length ? `<div class="pb-note">${escapeHtml(noteParts.join(" • "))}</div>` : "";
+      const miMatch = String(s.distance_label || "").match(/(\d+(?:\.\d+)?\s*mi\b)/i);
+      const legText =
+        s.index === 0
+          ? "Start"
+          : (s.distance_label || "").toLowerCase().includes("walk")
+          ? "🚶 Walk"
+          : `${s.driveFromPrev}m${miMatch ? " • " + miMatch[1] : ""}`;
+      return `
+        <tr>
+          <td class="pb-num">#${s.index + 1}</td>
+          <td class="pb-time">${s.arrivalFormatted} – ${s.departureFormatted}</td>
+          <td>
+            <div class="pb-fam">${escapeHtml(s.family_name)}${roleTag}</div>
+            ${noteHtml}
+          </td>
+          <td class="pb-addr">${escapeHtml(s.address)}</td>
+          <td class="pb-leg">${escapeHtml(legText)}</td>
+          <td class="pb-chk">${s.visited ? "☑" : "☐"}</td>
+        </tr>
+      `;
+    })
+    .join("");
+
+  sheet.innerHTML = `
+    <div class="pb-header">
+      <div class="pb-brand">
+        <svg width="28" height="28" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+          <path d="M12 1.2L13.3 5.2L17.2 6.2L13.3 7.2L12 11.2L10.7 7.2L6.8 6.2L10.7 5.2L12 1.2Z" fill="#F5C542" />
+          <polygon points="12,8.5 7,15.5 17,15.5" fill="#10B981" />
+          <polygon points="12,12.5 5,20.5 19,20.5" fill="#059669" />
+          <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
+        </svg>
+        <div>
+          <div class="pb-title">${escapeHtml(w.full)} — ${escapeHtml(activeDay.label)}</div>
+          <div class="pb-sub">${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
+        </div>
+      </div>
+      <div class="pb-meta">
+        <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
+        <div>Stops: <strong>${computed.length}</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+        ${coordLine}
+      </div>
+    </div>
+    <table class="pb-table">
+      <thead>
+        <tr>
+          <th>#</th>
+          <th>ETA Window</th>
+          <th>Family &amp; Notes</th>
+          <th>Address</th>
+          <th>Drive</th>
+          <th style="text-align:center;">✓</th>
+        </tr>
+      </thead>
+      <tbody>${rowsHtml}</tbody>
+    </table>
+    <div class="pb-footer">
+      <span>Printed ${escapeHtml(printedAt)}</span>
+      <span>St. Mary's Christmas Carol Backup Sheet • Live ETAs sync automatically in app</span>
+    </div>
+  `;
+
+  window.print();
+}
+
 function openQuickHelpModal() {
   const isAdmin = adminSession.unlocked && adminSession.wardId === activeWardId;
   const titleEl = document.getElementById("quick-help-title");

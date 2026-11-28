@@ -21,7 +21,7 @@
   <link rel="icon" href="./icons/icon.svg" type="image/svg+xml" />
   <link rel="apple-touch-icon" href="./icons/icon-192.png" />
   <link rel="manifest" href="./manifest.webmanifest" />
-  <link rel="stylesheet" href="./styles.css?v=43" />
+  <link rel="stylesheet" href="./styles.css?v=44" />
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -355,7 +355,7 @@
           <a id="footer-sms-btn" class="footer-chip" href="#" style="display: none;">💬 Text Coordinator</a>
           <button id="btn-gps" class="footer-chip" onclick="toggleGpsTracking()">📍 Near Me</button>
           <button class="footer-chip" onclick="copyFullDaySchedule()">📋 Copy Schedule</button>
-          <button class="footer-chip" onclick="window.print()">🖨️ Print Backup</button>
+          <button class="footer-chip" onclick="printDayBackup()">🖨️ Print Backup</button>
           <button class="footer-chip" onclick="openQuickHelpModal()">❓ Help</button>
           <button class="footer-chip" onclick="openSettingsModal()">⚙️ Settings &amp; Admin</button>
           <button class="footer-chip" onclick="lockCurrentWard()">🔒 Lock Ward</button>
@@ -892,11 +892,14 @@ Biju &amp; Mini | 2210 Rea Rd, Charlotte, NC 28277 | Day 2 | START |</textarea>
     </div>
   </div>
 
+  <!-- Dedicated Compact Print Backup Sheet (Hidden on Screen, Rendered #1..#N on Print) -->
+  <div id="print-backup-sheet" class="print-backup-sheet" aria-hidden="true"></div>
+
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
 
-  <script src="./supabase-config.js?v=43" charset="UTF-8"></script>
-  <script src="./optimizer.js?v=43" charset="UTF-8"></script>
-  <script src="./songbook.js?v=43" charset="UTF-8"></script>
-  <script src="./app.js?v=43" charset="UTF-8"></script>
+  <script src="./supabase-config.js?v=44" charset="UTF-8"></script>
+  <script src="./optimizer.js?v=44" charset="UTF-8"></script>
+  <script src="./songbook.js?v=44" charset="UTF-8"></script>
+  <script src="./app.js?v=44" charset="UTF-8"></script>
 </body>
 </html>
