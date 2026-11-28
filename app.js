@@ -2283,7 +2283,7 @@ function printDayBackup() {
       </div>
       <div class="pb-meta">
         <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
-        <div>Stops: <strong>${computed.length}</strong> • Visit: <strong>${defaultVisitMins}m/house</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+        <div><strong>${computed.length} stops</strong> • <strong>${defaultVisitMins}m/house</strong> • <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
         ${coordLine}
       </div>
     </div>
@@ -2358,13 +2358,13 @@ function printRouteMapBackup() {
           <rect x="11" y="20.5" width="2" height="2.3" rx="0.6" fill="#D9A441" />
         </svg>
         <div>
-          <div class="pb-title">🗺️ Route Map — ${escapeHtml(w.full)} (${escapeHtml(activeDay.label)})</div>
-          <div class="pb-sub">${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
+          <div class="pb-title">${escapeHtml(w.full)} • ${escapeHtml(activeDay.label)}</div>
+          <div class="pb-sub">🗺️ Route Map • ${escapeHtml(CFG.churchName)} • ${escapeHtml(seasonName)}</div>
         </div>
       </div>
       <div class="pb-meta">
         <div>Gather: <strong>${gatherStr}</strong> • Final ETA: <strong>${finalStop ? finalStop.arrivalFormatted : "--"}</strong></div>
-        <div>Stops: <strong>${computed.length}</strong> • Visit: <strong>${defaultVisitMins}m/house</strong> • Drive: <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
+        <div><strong>${computed.length} stops</strong> • <strong>${defaultVisitMins}m/house</strong> • <strong>${formatDriveDuration(totalTravelMins)} (${totalMiles.toFixed(1)} mi)</strong></div>
       </div>
     </div>
     <div class="pb-map-frame">

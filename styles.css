@@ -1824,28 +1824,32 @@ textarea {
     display: flex;
     align-items: center;
     gap: 10px;
+    min-width: 0;
   }
   .pb-title {
-    font-size: 13pt;
+    font-size: 11.5pt;
     font-weight: 900;
     color: #FDE68A;
+    white-space: nowrap;
   }
   html.light-theme .pb-title {
     color: #065F46;
   }
   .pb-sub {
-    font-size: 8.5pt;
+    font-size: 8pt;
     color: #D4E2EA;
-    margin-top: 1px;
+    margin-top: 2px;
   }
   html.light-theme .pb-sub {
     color: #334E45;
   }
   .pb-meta {
     text-align: right;
-    font-size: 8.2pt;
+    font-size: 7.8pt;
     color: #D4E2EA;
-    line-height: 1.4;
+    line-height: 1.45;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
   html.light-theme .pb-meta {
     color: #334E45;
